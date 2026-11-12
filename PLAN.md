@@ -165,7 +165,7 @@ Write down and **commit before the main run**:
 - **The primary comparison (D-008, D-013, D-023):** Nova Micro, B vs. B + hint. **Statistic:** the Newcombe hybrid-score 95% interval on the difference in scorer pass rates, two-sided. The result is "an effect" only if the interval excludes 0. Fisher's exact p-value and the analyst-adjusted rates are reported alongside, as secondary.
 - **The minimum detectable effect** at the planned sample size, so a null result reads as "inconclusive", not "no effect".
 - **Exclusion rules:** a target crash the agent caused counts as a **fail**, not an invalid run. An API error after any milestone is excluded but reported per cell.
-- Secondary, descriptive results: per-cell Wilson 95% intervals, label distributions, scorer disagreements, success rate by time block.
+- Secondary, descriptive results: per-cell Wilson 95% intervals, **refusal rate per cell** (D-025), label distributions, scorer disagreements, success rate by time block.
 - The exact matrix, N per cell, and the seeded, randomized-block run order.
 - If phase 4b is done: phase 7b, declared **exploratory**.
 - What would make you **reject** your own result.

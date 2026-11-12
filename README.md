@@ -18,7 +18,9 @@ A small, rigorous evaluation of whether an LLM agent (Amazon Nova Micro on Bedro
 |---|---|
 | `PLAN.md` | Phases, exit criteria, risks |
 | `DECISIONS.md` | Append-only decision log |
-| `harness/` | Agent loop, Bedrock client, run orchestration |
+| `harness/` | Agent loop, Bedrock client, run orchestration, telemetry validator |
+| `schemas/` | JSON schemas for the four telemetry records and the outcome labels |
+| `tests/` | pytest suites (`.venv/Scripts/python -m pytest`) |
 | `infra/bootstrap/` | One-time AWS setup: scoped IAM user and budget alarm |
 | `.claude/agents/` | Review agents used throughout the project |
 
