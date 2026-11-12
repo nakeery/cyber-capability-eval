@@ -1,0 +1,4 @@
+# Optional phase 4b dependencies. Kept separate so the harness can never
+# import PyRIT by accident (DECISIONS.md D-009, D-017).
+-r requirements.txt
+pyrit==1.1.0

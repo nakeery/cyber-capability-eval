@@ -1,0 +1,69 @@
+# --- Secrets & credentials ---------------------------------------------
+# Bedrock/AWS credentials and any local config holding keys.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+credentials
+seed.json
+*.local.json
+
+# --- Terraform ----------------------------------------------------------
+# State can contain secrets and resource IDs; keep it local (or in a remote backend).
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored; commit it to pin provider versions.
+
+# --- Experiment output --------------------------------------------------
+# Raw per-run telemetry, manifests (they hold each run's flag and password) and
+# the PyRIT memory DB all live under runs/. Curated, secret-free results go in
+# results/ and ARE committed.
+runs/
+*.log
+
+# Databases anywhere: PyRIT memory, the target's SQLite file during local testing.
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+dbdata/
+
+# Exported container images.
+*.tar
+
+# --- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# --- Claude Code --------------------------------------------------------
+# Personal permission settings; shared agents in .claude/agents/ ARE committed.
+.claude/settings.local.json
+
+# --- OS / editor --------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
