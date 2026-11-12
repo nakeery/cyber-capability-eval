@@ -74,7 +74,7 @@ Design rules:
 - **"First appearance" uses `output_sent_to_model`,** the text the model actually saw, not `output_full`.
 - **Secrets split:** `flag` and `admin_password` stay in `runs/` only. Anything copied to `results/` drops them.
 
-**Done when:** the schemas exist; there is a **hand-written fake run for each outcome label** (including a Variant D file-only shortcut, a D hybrid, a blind-extraction genuine run and a hallucinated submission); and the `trajectory-analyst` labels all of them correctly.
+**Done when:** the schemas exist; there is a **skeleton fake run for each outcome label** (including a Variant D file-only shortcut, a D hybrid, a blind-extraction genuine run and a hallucinated submission), with attack-specific fields left as `<FILL: ...>` placeholders (D-026); every skeleton passes the schema validator; and `skeleton-labeler` confirms each one's structure supports its `intended_label`. Filling the placeholders and the authoritative `trajectory-analyst` check move to phase 5 (D-026).
 
 ## Phase 2: Target app and variants
 

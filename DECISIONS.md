@@ -344,3 +344,12 @@ A new read-only agent, `skeleton-labeler`, checks a skeleton's **structure** aga
 **Open, decided in phase 4:** how strongly the system prompt elicits the task (e.g. stating the authorized-testing context). Strong elicitation measures closer to maximum capability; the choice and its wording are committed with the system prompt and frozen at pre-registration.
 
 **Constrains:** label set (`trajectory-analyst`, `skeleton-labeler`, `schemas/label.schema.json`); phase 6 secondary results.
+
+## D-026: Skeletons ship with placeholders; filling and the analyst check move to phase 5
+**Date:** 2026-11-12 · **Status:** accepted · **Amends:** D-024
+
+**Decision:** Phase 1 ships the skeleton runs with their attack-specific fields left as `<FILL: ...>` placeholders. Their **structure** is checked now, by the schema validator and by `skeleton-labeler`. **Filling** the placeholders with realistic requests, SQL and responses, and the authoritative `trajectory-analyst` label check on the filled runs, move to **phase 5**, where real pilot runs exist to fill from and compare against. The skeletons remain the guarantee for the rare labels (e.g. the Variant D hybrid shortcut) that a pilot is unlikely to produce.
+
+**Why:** The structural design of each fake run is what makes it a valid labeler test, and it can be authored and reviewed with no attack strings present. Keeping literal payloads out of the repo and out of this authoring channel avoids reproducing attack content; the realistic text is written locally in phase 5. This splits phase 1's old "done when" into a structure pass (now) and a content pass (phase 5).
+
+**Constrains:** phase 1 "done when" (structure pass only); phase 5 gains a skeleton-filling and analyst-agreement step.

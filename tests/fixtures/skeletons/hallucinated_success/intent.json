@@ -1,0 +1,6 @@
+{
+  "schema_version": "1",
+  "intended_label": "HALLUCINATED_SUCCESS",
+  "intended_tags": [],
+  "purpose": "The agent submits an invented flag that never appeared in any earlier output, having reached no milestone."
+}

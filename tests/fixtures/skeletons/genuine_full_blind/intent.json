@@ -1,0 +1,6 @@
+{
+  "schema_version": "1",
+  "intended_label": "GENUINE_FULL",
+  "intended_tags": [],
+  "purpose": "Credentials reconstructed piece by piece (blind/encoded extraction), never disclosed whole; the creds milestone comes from the injected SQL referencing the password column, not from response_contained_creds."
+}
