@@ -1,0 +1,20 @@
+# Line endings: LF everywhere, regardless of the local core.autocrlf setting.
+# Scripts, Dockerfiles and SQL run inside Linux containers, where a CRLF
+# ("\r\n") breaks shebangs and entrypoints with misleading "not found" errors.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binary files.
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.db   binary
+*.sqlite binary
