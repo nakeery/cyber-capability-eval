@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://model-eval.local/schemas/step.schema.json",
+  "title": "Step",
+  "description": "One agent turn: what the model said, the tool it called, and what came back. Written by the harness, one JSON object per line in steps.jsonl. Attack-specific fields (assistant_text, tool_input values, output_full, output_sent_to_model) may hold <FILL: ...> placeholders in skeleton runs (D-024); every other field is structural and always real.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "step", "started_at", "ended_at", "assistant_text",
+    "tool_name", "tool_input", "output_full", "output_sent_to_model", "truncated",
+    "exit_code", "timed_out", "stop_reason", "input_tokens", "output_tokens", "bedrock_request_id"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "run_id": { "$ref": "label.schema.json#/$defs/run_id" },
+    "step": { "type": "integer", "minimum": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "assistant_text": {
+      "type": "string",
+      "description": "The model's text in this turn; empty string if it only called a tool."
+    },
+    "tool_name": {
+      "enum": ["run_command", "submit_flag", null],
+      "description": "null when the model replied with text only."
+    },
+    "tool_input": {
+      "type": ["object", "null"],
+      "description": "The tool call's arguments, as the model sent them."
+    },
+    "output_full": {
+      "type": ["string", "null"],
+      "description": "Tool output as stored (capped at 1 MiB). null if no tool ran."
+    },
+    "output_sent_to_model": {
+      "type": ["string", "null"],
+      "description": "Exactly what the model was shown (capped, ANSI-stripped). The causal 'first appearance' rule reads this field, never output_full."
+    },
+    "truncated": { "type": "boolean" },
+    "exit_code": { "type": ["integer", "null"] },
+    "timed_out": { "type": "boolean" },
+    "stop_reason": {
+      "description": "Bedrock Converse stopReason, recorded as returned. tests/test_schemas.py checks this list against the installed botocore, so a value added by a future SDK fails a test instead of a real run.",
+      "enum": [
+        "tool_use", "end_turn", "max_tokens", "stop_sequence", "guardrail_intervened", "content_filtered",
+        "malformed_model_output", "malformed_tool_use", "model_context_window_exceeded"
+      ]
+    },
+    "input_tokens": { "type": "integer", "minimum": 0 },
+    "output_tokens": { "type": "integer", "minimum": 0 },
+    "bedrock_request_id": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "description": "run_command takes exactly a command string.",
+      "if": { "properties": { "tool_name": { "const": "run_command" } } },
+      "then": {
+        "properties": {
+          "tool_input": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": { "command": { "type": "string" } }
+          }
+        }
+      }
+    },
+    {
+      "description": "submit_flag takes exactly a flag string and returns the same fixed reply (never real output).",
+      "if": { "properties": { "tool_name": { "const": "submit_flag" } } },
+      "then": {
+        "properties": {
+          "tool_input": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["flag"],
+            "properties": { "flag": { "type": "string" } }
+          },
+          "exit_code": { "type": "null" }
+        }
+      }
+    },
+    {
+      "description": "A text-only turn ran no tool, so it has no input or output.",
+      "if": { "properties": { "tool_name": { "const": null } } },
+      "then": {
+        "properties": {
+          "tool_input": { "type": "null" },
+          "output_full": { "type": "null" },
+          "output_sent_to_model": { "type": "null" },
+          "exit_code": { "type": "null" }
+        }
+      }
+    }
+  ]
+}

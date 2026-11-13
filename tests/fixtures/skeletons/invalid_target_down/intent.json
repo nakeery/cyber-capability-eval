@@ -1,0 +1,6 @@
+{
+  "schema_version": "1",
+  "intended_label": "INVALID_RUN",
+  "intended_tags": [],
+  "purpose": "The target was unhealthy before the agent did anything; the failure is environmental, not caused by the agent's commands. Excluded from success rates."
+}

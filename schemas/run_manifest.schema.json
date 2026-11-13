@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://model-eval.local/schemas/run_manifest.schema.json",
+  "title": "Run manifest",
+  "description": "Everything about how one run was set up and how it ended. Written by the harness; NEVER shown to the agent. Holds the per-run secrets unless redacted (copies in results/ are redacted).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "redacted", "variant", "variant_config", "condition",
+    "prompt_variant_id", "model_id", "region", "inference_config", "system_prompt_hash",
+    "hint_text", "step_cap", "image_digests", "harness_commit", "docker_version",
+    "run_order_seed", "started_at", "ended_at", "target_health_start", "target_health_end",
+    "container_exit_codes", "api_retries", "termination_reason", "harness_error"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "run_id": { "$ref": "label.schema.json#/$defs/run_id" },
+    "redacted": {
+      "type": "boolean",
+      "description": "false in runs/ (secrets present); true in results/ (secrets removed)."
+    },
+    "variant": { "enum": ["A", "B", "C", "D"] },
+    "variant_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["injectable_path", "injectable_param", "users_table", "username_column", "password_column"],
+      "properties": {
+        "injectable_path": { "type": "string", "pattern": "^/" },
+        "injectable_param": { "type": "string", "minLength": 1 },
+        "users_table": { "type": "string", "minLength": 1 },
+        "username_column": { "type": "string", "minLength": 1 },
+        "password_column": { "type": "string", "minLength": 1 }
+      }
+    },
+    "condition": { "enum": ["no_hint", "hint"] },
+    "prompt_variant_id": {
+      "type": "string",
+      "pattern": "^(original|v[1-9])$",
+      "description": "Which task-prompt wording was used (phase 7b); 'original' in the main matrix."
+    },
+    "model_id": { "type": "string", "minLength": 1 },
+    "region": { "type": "string", "pattern": "^[a-z]{2}-[a-z]+-[0-9]$" },
+    "inference_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature", "top_p", "max_tokens"],
+      "properties": {
+        "temperature": { "type": "number", "minimum": 0, "maximum": 1 },
+        "top_p": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "max_tokens": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "system_prompt_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "hint_text": { "type": ["string", "null"] },
+    "step_cap": { "type": "integer", "minimum": 1 },
+    "image_digests": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+      "description": "Service name -> image digest (at least the attacker and the target)."
+    },
+    "harness_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "docker_version": { "type": "string", "minLength": 1 },
+    "run_order_seed": { "type": "integer" },
+    "flag": { "type": "string", "minLength": 16 },
+    "admin_password": { "type": "string", "minLength": 16 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "target_health_start": { "$ref": "#/$defs/health" },
+    "target_health_end": { "$ref": "#/$defs/health" },
+    "container_exit_codes": {
+      "type": "object",
+      "additionalProperties": { "type": ["integer", "null"] }
+    },
+    "api_retries": { "type": "integer", "minimum": 0 },
+    "termination_reason": {
+      "enum": ["submitted", "step_cap", "context_limit", "agent_stopped", "target_down", "harness_error", "api_error"]
+    },
+    "harness_error": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    {
+      "description": "Secrets are present exactly when the record is not redacted.",
+      "if": { "properties": { "redacted": { "const": false } } },
+      "then": { "required": ["flag", "admin_password"] },
+      "else": { "not": { "anyOf": [{ "required": ["flag"] }, { "required": ["admin_password"] }] } }
+    },
+    {
+      "description": "The hint text is present exactly in the hint condition.",
+      "if": { "properties": { "condition": { "const": "hint" } } },
+      "then": { "properties": { "hint_text": { "type": "string", "minLength": 1 } } },
+      "else": { "properties": { "hint_text": { "type": "null" } } }
+    },
+    {
+      "description": "A harness error message is present exactly when the run ended in a harness error.",
+      "if": { "properties": { "termination_reason": { "const": "harness_error" } } },
+      "then": { "properties": { "harness_error": { "type": "string", "minLength": 1 } } },
+      "else": { "properties": { "harness_error": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "health": { "enum": ["healthy", "unhealthy", "unknown"] }
+  }
+}

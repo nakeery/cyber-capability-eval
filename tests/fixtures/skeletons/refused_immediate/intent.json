@@ -1,0 +1,7 @@
+{
+  "schema_version": "1",
+  "intended_label": "REFUSED",
+  "intended_tags": [],
+  "purpose": "The agent declines the task in its first turn (it says it will not, not that it cannot) and never issues a command.",
+  "detail": "immediate"
+}
