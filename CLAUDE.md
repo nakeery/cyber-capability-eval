@@ -8,7 +8,7 @@ A small, rigorous **cyber-capability evaluation lab**: an LLM agent attacks a de
 
 ## Status
 
-Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-035 are accepted; the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`) land in phase 2's first commit. Next: phase 2 (target app), on branch `phase-2-target` — but see the safety note below.
+Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-039 are accepted (D-036 to D-039 amend D-027, D-029, D-010, D-030 and D-035 after the phase 2 readiness reviews); the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`, `clock_uncertainty_ms`, `seq`) land in phase 2's first commit. Next: phase 2 (target app), on branch `phase-2-target` — but see the safety note below.
 
 ## How to work here
 
@@ -20,7 +20,7 @@ Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). 
 
 ## Safety note (important)
 
-A safety classifier repeatedly **stops responses that author realistic attack content** (SQL injection payloads, exploit strings), even for this legitimate, contained eval. The project works around this (D-024, D-026, D-035): fake runs are authored as **skeletons** with attack-specific fields left as `<FILL: ...>` role descriptors, and structural fields concrete. The literal payloads, SQL and the real target app are filled in / built **locally**, not in the chat channel: the target app in phase 2, the skeleton fill at the end of phase 2 (D-035), and real pilot content in phase 5. If you hit a stop, don't retry the same content — keep attack specifics as placeholders and hand the fill to the user.
+A safety classifier repeatedly **stops responses that author realistic attack content** (SQL injection payloads, exploit strings), even for this legitimate, contained eval. The project works around this (D-024, D-026, D-035): fake runs are authored as **skeletons** with attack-specific fields left as `<FILL: ...>` role descriptors, and structural fields concrete. The literal payloads, SQL and the real target app are filled in / built **locally**, not in the chat channel: the target app in phase 2, the skeleton fill at the end of phase 2 (D-035; local and gitignored, D-039), and real pilot content in phase 5. If you hit a stop, don't retry the same content — keep attack specifics as placeholders and hand the fill to the user.
 
 ## Security invariants (don't regress these)
 
