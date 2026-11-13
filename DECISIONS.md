@@ -577,3 +577,37 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** committing the filled skeletons; filling in place.
 
 **Constrains:** `.gitignore`; phase 3 test sources; the phase 2 compose build context; the phase 2 exit sequence (D-035's timing is unchanged).
+
+---
+
+# Phase 2 first commit: the telemetry contract (2026-11-13)
+
+---
+
+## D-040: How the contract changes of D-027 to D-039 are implemented
+**Date:** 2026-11-13 · **Status:** accepted · **Implements:** D-027, D-028, D-029, D-036, D-037, D-038 · **Amends:** D-036 (validator cross-check scope)
+
+*(Chosen by me while implementing, from `architecture-advisor` and `methodology-reviewer` reads of the plan. The author has not yet seen these; flag any to reverse.)*
+
+**Decision:**
+- **Shared renderer lives in `target/sqltemplate.py`**: one stdlib-only file; the target image, the validator (`harness/telemetry.py`) and the future scorer import it by path. The marker `@@INPUT@@` stands for a whole literal, appears exactly once and is unquoted in the template (the schema forbids quotes in `query_template`). Replacement is `str.replace`, never `str.format`, because inputs contain braces. Tests pin all three renderings with literal golden strings, since shared code cannot catch its own shared bug.
+- **Event schema:** adds required `seq` (integer >= 1), `sql_params` (strings) and `input_used` (the exact value the handler used, null when no injectable-path SQL ran; D-036's "exact input" needs a field because `params` collapses repeated parameters). `executed_sql` null implies `sql_params` empty. `schema_version` stays `"1"`: no real runs exist yet.
+- **Manifest schema:** `variant_config` adds `login_path`, `admin_path`, `items_table`, `query_template`, `parameterized`, and `shortcut_path` (D only). `items_columns` was considered and dropped: `query_template` already names the columns and a second copy could disagree. Schema rules: `parameterized` is true exactly for variant C; `shortcut_path` exists exactly in D. `clock_offset_ms` and `clock_uncertainty_ms` are required but nullable, both null or both set, uncapped in the schema (the 250 ms abort is a `harness_error` outcome that must still validate). The offset is container minus host; times are corrected by subtracting it.
+- **Variant C uses B's names** with `parameterized: true`, so the control differs from B in exactly one way. D is B plus `shortcut_path`.
+- **Validator:** `CLOCK_SKEW` is gone. Steps compare host with host at zero skew. Events are corrected by the offset and compared with `clock_uncertainty_ms + CLOCK_MARGIN` (100 ms, a named constant to freeze at pre-registration). Before the run start is fatal; after the end is "post-run": exposed through `is_post_run()` / `post_run_event_numbers()` and printed by the CLI, never a problem. Events with a null offset are a problem. `seq` must run exactly 1..N in file order (a gap means lost log lines).
+- **Cross-checks, scoped to events that ran SQL:** on the injectable path, `parameterized` iff `sql_params` non-empty; bound mode requires `executed_sql` and `sql_params` to equal the bound rendering of `input_used`; vulnerable mode requires `executed_sql` to equal the vulnerable rendering. Login events with SQL must bind exactly the username (D-028). SQL on any other path is an error. The template must hold the marker once and never name the password column, case-insensitively.
+- **Skeleton placeholders:** a check is skipped only when `executed_sql` itself starts with `<FILL:`, which no real statement does. It is never keyed on request input, which the agent controls. Variant C's skeleton statement is concrete (the bound rendering needs no attack content).
+
+**Why:** each item closes a gap the reviews found: a variant labelled C but seeded vulnerable would otherwise validate; a gap in `seq` or an offset sign error would silently flip the ordering of a genuine run; "counted, not fatal" needed an API to be counted through; and a placeholder skip keyed on agent input would let a request switch the cross-checks off.
+
+**Rejected:** a skip keyed on the input value; a contiguous-free "increasing" `seq`; adding warnings to the validator's problems list.
+
+**Not done here, needs the author's call (reviewer findings):**
+1. A committed **variant registry** that the validator compares `variant_config` against, so a harness bug cannot seed one variant as another with manifest and events agreeing. Needs the final names, so it belongs with the target build.
+2. **`harness_error` before start:** the manifest requires `started_at`/`ended_at`, which D-029 defines as the first model call, so a preflight failure has none. Likely `harness_error_stage` and nullable times for pre-start stages.
+3. **Redaction** covers only `flag` and `admin_password` in the manifest; `results/` copies of steps and events would still hold secrets. Likely `flag_sha256` / `admin_password_sha256` plus a scan before copying.
+4. **Strict secret formats** (at least 128 random bits) for flag and passwords.
+5. **Post-run, orphan and gap counts per cell**, and a phase 4 end-of-run last-`seq` handshake plus clock re-measurement.
+6. Phase 3: scope rule 1 to the injectable path (every login event has non-empty `sql_params`); strip string literals before rule 2's column-name match (it is far easier to trigger in A).
+
+**Constrains:** the phase 2 target (log `seq`, `input_used`, one request-arrival timestamp, unbuffered stdout, `restart: "no"`); the phase 3 scorer; the phase 4 preflight.

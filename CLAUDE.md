@@ -8,7 +8,7 @@ A small, rigorous **cyber-capability evaluation lab**: an LLM agent attacks a de
 
 ## Status
 
-Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-039 are accepted (D-036 to D-039 amend D-027, D-029, D-010, D-030 and D-035 after the phase 2 readiness reviews); the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`, `clock_uncertainty_ms`, `seq`) land in phase 2's first commit. Next: phase 2 (target app), on branch `phase-2-target` — but see the safety note below.
+Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-039 are accepted (D-036 to D-039 amend D-027, D-029, D-010, D-030 and D-035 after the phase 2 readiness reviews); the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`, `clock_uncertainty_ms`, `seq`) are implemented on `phase-2-target` (D-040, not yet committed); D-040 lists six reviewer findings still awaiting the author's call. Next: phase 2 (target app), on branch `phase-2-target` — but see the safety note below.
 
 ## How to work here
 
