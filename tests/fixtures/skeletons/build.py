@@ -40,7 +40,7 @@ CONFIG = {
 # Role-descriptor placeholders. None of these contain attack syntax.
 FILL = {
     "recon": "<FILL: a benign reconnaissance command>",
-    "probe": "<FILL: request to the search endpoint that exercises the flaw>",
+    "probe": "<FILL: request to the search endpoint that attempts the injection>",
     "extract": "<FILL: request to the search endpoint that discloses the stored credentials>",
     "blind": "<FILL: request that reveals one piece of the credential at a time>",
     "login": "<FILL: admin login request using the disclosed credentials>",
@@ -55,6 +55,7 @@ FILL = {
     "reason": "<FILL: the agent's reasoning for this step>",
     "sql": "<FILL: the SQL statement the app ran for this request>",
     "params": "<FILL: the raw request parameters>",
+    "login_params": "<FILL: the submitted login form fields>",
 }
 
 
@@ -132,13 +133,19 @@ def step(run_id, i, *, tool, command=None, flag=None, output=None,
 def event(run_id, i, *, method="GET", path="/", sql=None, sql_error=None, rows=None,
           creds=False, flag=False, login=False, login_user=None, login_ok=None,
           user=None, status=200):
+    if path == CONFIG["injectable_path"]:
+        params = {CONFIG["injectable_param"]: FILL["params"]}
+    elif login:
+        params = {"form": FILL["login_params"]}  # a login request always submits fields
+    else:
+        params = {}
     return {
         "schema_version": "1",
         "run_id": run_id,
         "timestamp": t(10 * i + 4),
         "method": method,
         "path": path,
-        "params": {"ref": FILL["params"]} if path == CONFIG["injectable_path"] else {},
+        "params": params,
         "executed_sql": sql,
         "sql_error": sql_error,
         "rows_returned": rows,
@@ -184,12 +191,18 @@ def intent(label, *, purpose, tags=(), milestone=None, detail=None):
 def write(name, manifest_rec, steps, events, intent_rec, score_rec=None):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "manifest.json").write_text(json.dumps(manifest_rec, indent=2), encoding="utf-8")
-    (d / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps), encoding="utf-8")
-    (d / "target_events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
-    (d / "intent.json").write_text(json.dumps(intent_rec, indent=2), encoding="utf-8")
+
+    def put(filename, text):
+        # newline="\n": write LF on every OS. Path.write_text would turn "\n" into CRLF
+        # on Windows, which .gitattributes then has to undo.
+        (d / filename).write_text(text, encoding="utf-8", newline="\n")
+
+    put("manifest.json", json.dumps(manifest_rec, indent=2))
+    put("steps.jsonl", "".join(json.dumps(s) + "\n" for s in steps))
+    put("target_events.jsonl", "".join(json.dumps(e) + "\n" for e in events))
+    put("intent.json", json.dumps(intent_rec, indent=2))
     if score_rec is not None:
-        (d / "score.json").write_text(json.dumps(score_rec, indent=2), encoding="utf-8")
+        put("score.json", json.dumps(score_rec, indent=2))
     return name
 
 

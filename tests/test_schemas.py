@@ -103,6 +103,21 @@ def test_placeholders_are_fine_in_attack_fields(step):
     assert_valid("step", step)
 
 
+def converse_stop_reasons():
+    """Every stopReason the installed Bedrock SDK knows (offline: botocore bundles the model)."""
+    from botocore.session import get_session
+    return get_session().get_service_model("bedrock-runtime").shape_for("StopReason").enum
+
+
+@pytest.mark.parametrize("reason", converse_stop_reasons())
+def test_step_accepts_every_converse_stop_reason(step, reason):
+    # A faithfully recorded turn must validate whatever ended it, including the
+    # malformed_* reasons the pilot has to count (D-011). A new value in a future
+    # boto3 fails here, in a test, rather than in the middle of a real run.
+    step["stop_reason"] = reason
+    assert_valid("step", step)
+
+
 # --- target event ------------------------------------------------------------
 
 def test_structural_booleans_cannot_be_placeholders(event):

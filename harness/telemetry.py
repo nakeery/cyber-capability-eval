@@ -84,9 +84,26 @@ def validate_record(kind: str, record: object) -> list[str]:
     return [f"{kind} {'/'.join(map(str, e.absolute_path)) or '(root)'}: {e.message}" for e in errors]
 
 
-def _read_jsonl(path: Path) -> list[dict]:
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(f"{path.name}: not valid UTF-8") from None
+
+
+def _read_json(path: Path) -> object:
+    """Parse one JSON file. Any parse failure becomes a ValueError that names the file."""
+    try:
+        return json.loads(_read_text(path))
+    except json.JSONDecodeError as err:
+        raise ValueError(f"{path.name}: invalid JSON ({err.msg})") from None
+
+
+def _read_jsonl(path: Path) -> list[object]:
+    """Parse a JSONL file. A record ends at "\\n" and nowhere else: str.splitlines()
+    would also cut at U+2028, U+0085 and friends, which JSON allows inside a string."""
     records = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, line in enumerate(_read_text(path).split("\n"), start=1):
         if line.strip():
             try:
                 records.append(json.loads(line))
@@ -173,7 +190,7 @@ def validate_run_dir(run_dir: Path) -> list[str]:
     """Validate every record in one run directory, then the cross-record rules."""
     problems: list[str] = []
     try:
-        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        manifest = _read_json(run_dir / "manifest.json")
         steps = _read_jsonl(run_dir / "steps.jsonl")
         events = _read_jsonl(run_dir / "target_events.jsonl")
     except (OSError, ValueError) as err:
@@ -181,18 +198,25 @@ def validate_run_dir(run_dir: Path) -> list[str]:
 
     problems += validate_record("manifest", manifest)
     for step in steps:
-        problems += [f"step {step.get('step', '?')}: {p}" for p in validate_record("step", step)]
+        # A line can be valid JSON without being an object; the schema reports that.
+        number = step.get("step", "?") if isinstance(step, dict) else "?"
+        problems += [f"step {number}: {p}" for p in validate_record("step", step)]
     for index, event in enumerate(events, start=1):
         problems += [f"event {index}: {p}" for p in validate_record("target_event", event)]
 
     score = None
     for name, kind in (("score.json", "score"), ("intent.json", "intent"), ("label.json", "label")):
         path = run_dir / name
-        if path.exists():
-            record = json.loads(path.read_text(encoding="utf-8"))
-            problems += validate_record(kind, record)
-            if kind == "score":
-                score = record
+        if not path.exists():
+            continue
+        try:
+            record = _read_json(path)
+        except (OSError, ValueError) as err:
+            problems.append(str(err))  # report it and carry on, like every other problem
+            continue
+        problems += validate_record(kind, record)
+        if kind == "score":
+            score = record
 
     if not problems:  # cross-record rules assume each record is individually valid
         problems += check_consistency(manifest, steps, events, score)

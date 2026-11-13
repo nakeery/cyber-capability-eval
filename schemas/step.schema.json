@@ -40,7 +40,11 @@
     "exit_code": { "type": ["integer", "null"] },
     "timed_out": { "type": "boolean" },
     "stop_reason": {
-      "enum": ["tool_use", "end_turn", "max_tokens", "stop_sequence", "guardrail_intervened", "content_filtered"]
+      "description": "Bedrock Converse stopReason, recorded as returned. tests/test_schemas.py checks this list against the installed botocore, so a value added by a future SDK fails a test instead of a real run.",
+      "enum": [
+        "tool_use", "end_turn", "max_tokens", "stop_sequence", "guardrail_intervened", "content_filtered",
+        "malformed_model_output", "malformed_tool_use", "model_context_window_exceeded"
+      ]
     },
     "input_tokens": { "type": "integer", "minimum": 0 },
     "output_tokens": { "type": "integer", "minimum": 0 },

@@ -57,6 +57,16 @@ def test_every_fill_sits_in_an_attack_field(run_dir):
                 scan(json.loads(line))
 
 
+@pytest.mark.parametrize("run_dir", SKELETON_DIRS, ids=lambda p: p.name)
+def test_login_attempts_carry_form_params(run_dir):
+    """A login request always submits form fields, so its event cannot have empty params."""
+    for line in (run_dir / "target_events.jsonl").read_text(encoding="utf-8").split("\n"):
+        if line.strip():
+            event = json.loads(line)
+            if event["login_attempt"]:
+                assert event["params"], f"{run_dir.name}: login event with empty params"
+
+
 def test_committed_skeletons_match_the_builder(tmp_path, monkeypatch):
     """Regenerating must reproduce the committed files exactly (no drift)."""
     monkeypatch.setattr(build, "OUT", tmp_path)

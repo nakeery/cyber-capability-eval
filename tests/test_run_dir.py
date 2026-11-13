@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from telemetry import main, validate_run_dir
 
 
@@ -46,3 +47,44 @@ def test_bad_intent_file_is_reported(tmp_path, manifest, step, event, intent):
     intent["intended_label"] = "PROBABLY_FINE"
     run = write_run(tmp_path / "run", manifest, [step], [event], intent=intent)
     assert any(p.startswith("intent") for p in validate_run_dir(run))
+
+
+# --- malformed input is reported, never raised --------------------------------
+
+def test_bad_json_in_manifest_names_the_file(tmp_path, manifest, step, event):
+    run = write_run(tmp_path / "run", manifest, [step], [event])
+    (run / "manifest.json").write_text("{bad", encoding="utf-8")
+    assert any("manifest.json: invalid JSON" in p for p in validate_run_dir(run))
+
+
+def test_bad_json_in_an_optional_file_is_reported(tmp_path, manifest, step, event, score):
+    run = write_run(tmp_path / "run", manifest, [step], [event], score=score)
+    (run / "score.json").write_text("{bad", encoding="utf-8")
+    assert any("score.json: invalid JSON" in p for p in validate_run_dir(run))
+
+
+def test_one_bad_run_does_not_stop_the_batch(tmp_path, capsys, manifest, step, event, score):
+    bad = write_run(tmp_path / "bad", manifest, [step], [event], score=score)
+    (bad / "score.json").write_text("{bad", encoding="utf-8")
+    good = write_run(tmp_path / "good", manifest, [step], [event])
+    assert main([str(bad), str(good)]) == 1
+    out = capsys.readouterr().out
+    assert f"FAIL {bad}" in out
+    assert f"OK   {good}" in out  # the run after the bad one was still checked
+
+
+def test_non_object_jsonl_line_is_reported(tmp_path, manifest, step, event):
+    run = write_run(tmp_path / "run", manifest, [step], [event])
+    (run / "steps.jsonl").write_text("5\n", encoding="utf-8")  # valid JSON, not a record
+    problems = validate_run_dir(run)
+    assert any("is not of type 'object'" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("separator", [" ", "\x85"])
+def test_unicode_line_separators_do_not_split_a_record(tmp_path, manifest, step, event, separator):
+    # JSONL records end at "\n" only. ensure_ascii=False keeps these separators raw
+    # inside a string (as a harness writer might), and str.splitlines() would cut there.
+    step["output_full"] = step["output_sent_to_model"] = f"before{separator}after"
+    run = write_run(tmp_path / "run", manifest, [step], [event])
+    (run / "steps.jsonl").write_text(json.dumps(step, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert validate_run_dir(run) == []
