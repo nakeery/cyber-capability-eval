@@ -8,7 +8,7 @@ A small, rigorous **cyber-capability evaluation lab**: an LLM agent attacks a de
 
 ## Status
 
-Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-039 are accepted (D-036 to D-039 amend D-027, D-029, D-010, D-030 and D-035 after the phase 2 readiness reviews); the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`, `clock_uncertainty_ms`, `seq`) are committed on `phase-2-target` (D-040; D-040 lists six reviewer findings still awaiting the author's call). The target app (`target/`, D-041), its Dockerfiles and compose files (D-034), and a first containment audit (D-042) are built but uncommitted; the author wrote the vulnerable search branch locally. Remaining phase 2 work: the hand-exploit of A, B and D, the variant registry, then filling the skeletons locally (D-035, D-039).
+Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). Phase 1 is a structure pass: the skeleton fake runs still hold `<FILL: ...>` placeholders, to be filled locally at the end of phase 2 (D-035). The pre-phase-2 decisions D-027 to D-039 are accepted (D-036 to D-039 amend D-027, D-029, D-010, D-030 and D-035 after the phase 2 readiness reviews); the schema, validator and fixture changes they imply (`sql_params`, `query_template`, `clock_offset_ms`, `clock_uncertainty_ms`, `seq`) are committed on `phase-2-target` (D-040; D-040 lists six reviewer findings still awaiting the author's call). The target app (`target/`, D-041), its Dockerfiles and compose files (D-034), and a first containment audit (D-042) are committed on `phase-2-target` and accepted by the author, who wrote the vulnerable search branch locally. `harness/hand_lab.py` (D-043) starts a lab for the hand-exploit. Remaining phase 2 work: the hand-exploit of A, B and D (the author's), the variant registry, then filling the skeletons locally from the real events (D-035, D-039).
 
 ## How to work here
 
@@ -39,7 +39,9 @@ The user's email and AWS account ID are private. Never put them in external requ
 |---|---|
 | `PLAN.md`, `DECISIONS.md` | Phases/exit criteria; append-only decision log |
 | `schemas/` | JSON Schemas for the four telemetry records + outcome labels |
-| `harness/` | Bedrock smoke test, telemetry validator (agent loop/orchestration come later) |
+| `harness/` | Bedrock smoke test, telemetry validator, target-log collector, `hand_lab.py` (local lab starter for the hand-exploit; phase 4 supersedes it) |
+| `target/`, `attacker/` | The vulnerable Flask app and its image; the container the agent's commands run in |
+| `docker-compose.yml`, `docker-compose.d.yml` | The internal-only lab network; the D override adds one read-only flag volume |
 | `tests/` | pytest suites; `tests/fixtures/skeletons/` holds the placeholder fake runs |
 | `infra/bootstrap/` | One-time AWS setup (scoped IAM user, budget) |
 | `.claude/agents/` | Review agents: architecture-advisor, methodology-reviewer, containment-auditor, trajectory-analyst, skeleton-labeler |

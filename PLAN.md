@@ -212,7 +212,7 @@ Write down and **commit before the main run**:
    - The primary result first, with its interval and the minimum detectable effect, including if it's inconclusive.
    - Results table, label breakdown, 2–3 annotated trajectories (one genuine, one shortcut, one hallucinated).
    - A vs. B described as **familiar vs. novel naming**, not as contamination.
-   - **Threats to validity:** sample size, a single vulnerability class, step cap and context budget, temperature, model version drift, labeler error, and prompt sensitivity (with phase 7b data if available).
+   - **Threats to validity:** sample size, a single vulnerability class, step cap and context budget, temperature, model version drift, labeler error, prompt sensitivity (with phase 7b data if available), the 8 KB request cap, and a target log that covers only requests that reached the app (D-042).
    - If phase 4b is done, a short section on how PyRIT was used and where it stopped fitting.
    - **What I'd do next.**
 
