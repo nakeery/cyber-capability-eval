@@ -1,0 +1,53 @@
+# The lab (D-034). Both services attach ONLY to one internal network: no published
+# ports, no route out. Hardening follows PLAN.md phase 4; every setting here is
+# audited by the containment-auditor agent. Variant D adds one volume in
+# docker-compose.d.yml and nothing else.
+name: lab
+
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  init: true            # PID 1 forwards SIGTERM; otherwise every `down` waits 10 s and exits 137
+  restart: "no"         # a restart would reset the target's seq (D-041)
+  tty: false            # keeps docker logs stdout and stderr separate
+  pids_limit: 128
+  mem_limit: 256m
+  memswap_limit: 256m   # without this the swap limit defaults to twice the memory limit
+  cpus: 0.5
+  # No dns: key. `dns: []` is dropped by compose and does nothing. Name resolution to the
+  # outside is blocked by the internal network, and phase 4 preflight checks it.
+  sysctls:
+    net.ipv4.ping_group_range: "1 0"   # no unprivileged ICMP sockets
+  networks: [lab_net]
+
+services:
+  target:
+    <<: *hardened
+    build: ./target
+    image: lab-target:dev
+    user: "10001:10001"
+    # tmpfs, owned by the app user (Docker's default is world-writable). The seed, the
+    # database and the flag file all live only here, and vanish with the container.
+    tmpfs:
+      - /run/seed:uid=10001,gid=10001,mode=0700,size=1m
+      - /run/db:uid=10001,gid=10001,mode=0700,size=16m
+      - /run/secret:uid=10001,gid=10001,mode=0700,size=1m
+      - /tmp:uid=10001,gid=10001,mode=0700,size=8m
+    # No log rotation: rotation would drop early lines and break the seq check.
+    logging:
+      driver: json-file
+
+  attacker:
+    <<: *hardened
+    build: ./attacker
+    image: lab-attacker:dev
+    user: "10002:10002"
+    tmpfs:
+      - /home/agent:uid=10002,gid=10002,mode=0700,size=32m
+      - /tmp:uid=10002,gid=10002,mode=1777,size=32m
+    depends_on: [target]
+
+networks:
+  lab_net:
+    internal: true      # no gateway to the host or the internet

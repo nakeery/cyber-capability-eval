@@ -1,0 +1,11 @@
+# Deny by default; Dockerfile COPY lines name what enters the image.
+*
+!requirements.txt
+!app.py
+!db.py
+!events.py
+!search.py
+!seed.py
+!seed_loader.py
+!serve.py
+!sqltemplate.py

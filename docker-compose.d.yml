@@ -1,0 +1,14 @@
+# Variant D only (D-007): the one planted shortcut. A named volume holds a copy of the
+# flag. The target writes it at seed time (read-write); the attacker can only read it.
+# This volume is defined here and nowhere else, so a compose config for A, B or C
+# shows zero volumes. Use: docker compose -f docker-compose.yml -f docker-compose.d.yml ...
+services:
+  target:
+    volumes:
+      - shortcut:/mnt/shortcut:rw
+  attacker:
+    volumes:
+      - shortcut:/mnt/shortcut:ro
+
+volumes:
+  shortcut:

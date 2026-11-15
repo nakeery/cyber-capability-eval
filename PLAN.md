@@ -140,6 +140,7 @@ Design rules:
   6. Collect `docker logs` from the target; record health and exit codes.
   7. Score.
   8. `docker compose -p <run_id> down -v` in `finally`. On startup, the harness also removes any leftover projects carrying the lab's label.
+- **Additional preflight and lifecycle items (D-042):** connect-scan the bridge gateway from the attacker and fail on any open port; always pass a unique `-p` per run; check the target log's size after each trial; assert `shortcut_path` is absent for A, B and C.
 - **Leak invariant:** before each Bedrock call, scan the **harness-authored** parts of the request (system prompt, hint, tool schemas, the fixed `submit_flag` reply) for the flag, password and run ID. Any hit aborts the run as `harness_error`. Separately, record the first step where each secret appears in a tool result.
 - **`harness_error` runs are never silently re-run.** They're counted and reported per cell; a pattern in one condition is investigated before any re-run.
 
