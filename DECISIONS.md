@@ -782,3 +782,74 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** inventing plausible-looking fake credentials when no real one exists to borrow (would make a structural gap look filled instead of flagging it); a shared secrets file as a second input (unnecessary — everything needed is already in the skeleton).
 
 **Constrains:** `tests/fixtures/skeletons/fill_locally.py`; `tests/test_fill_locally.py`.
+
+---
+
+## D-049: Second containment audit reconfirms D-042; `hand_lab.py`'s stale-stack guard doesn't catch a manually-removed container
+**Date:** 2026-11-16 · **Status:** accepted · **Extends:** D-042
+
+*(Chosen from an independent `containment-auditor` re-run against the current code, not a re-read of D-042's prose, requested as a second check on the phase 2 completion claim in CLAUDE.md. The author has not yet seen this; flag any to reverse.)*
+
+**Decision:**
+- **Result:** no new critical or high finding. Every boundary D-042 checked — flag isolation, the read-only search connection, compose hardening (verified live via `docker compose config` on both the base and D-override files), secrets never touching argv/env/disk, session-key strength, `.dockerignore` build-context scoping — is still solid in the current code, including after D-047's `variant_registry.py` addition. The two gaps D-042 already deferred to phase 4 (the host-gateway's port 111 reachable from the attacker; a hard-coded, non-unique compose project name with no pre-`up` sweep) are unchanged and still correctly out of phase 2's scope.
+- **New, low-severity finding:** `harness/hand_lab.py`'s `cmd_up` refuses to start a stack only when `_stack_exists()` reports a *live* container. If a prior stack were removed by something other than `down` (a manual `docker rm`, a crashed process) while `runs/hand/current` still names that variant, a fresh `up <variant>` would silently overwrite that variant's `secrets.json` without `down`'s usual step of saving the stack's final event log first.
+- **Left unfixed, by design:** `hand_lab.py` is a local, single-operator dev tool with no agent in its loop (D-043); the only consequence of this gap is losing one hand-exploit log on an already-unusual operator mistake, not a containment boundary an untrusted agent could reach. Phase 4's real harness supersedes this tool entirely (D-043), so fixing it here would be effort spent on code already slated for replacement.
+
+**Why:** worth recording rather than silently fixing or quietly dropping, so a future session doesn't lose a hand-exploit log the same way without knowing it was a known, accepted gap in a tool that's going away.
+
+**Rejected:** fixing `cmd_up` to re-check `runs/hand/current` against the live container set — correct but unnecessary effort for a tool phase 4 replaces.
+
+**Constrains:** nothing beyond `harness/hand_lab.py` itself; no schema, validator or phase 4 harness change implied.
+
+---
+
+## D-050: `apply` syncs `manifest.admin_password` to the real login password it fills in
+**Date:** 2026-11-16 · **Status:** accepted · **Fixes:** a gap named by the independent `architecture-advisor` re-run (D-049's sibling) and confirmed by direct cross-check against `runs/hand/`
+
+**Decision:**
+- **`build.py`'s `FAKE_PW` and `FAKE_FLAG` look symmetric but weren't wired the same way.** `FAKE_FLAG` is written into both `manifest["flag"]` and every `submit_flag` step's literal argument, so "the submitted flag matches the manifest's real one" holds by construction. `FAKE_PW` was only ever written into `manifest["admin_password"]` — there's no `submit_password` step, so nothing else in `build.py` referenced it. Once `fill_locally.py`'s `apply` started filling the login event's `params.password` with the *real* hand-exploit password (one of D-044's three fillable categories), `FAKE_PW` was stranded: nothing kept `manifest.admin_password` in sync with the password the transcript actually shows being used.
+- **Confirmed empirically, not just by inspection:** cross-referencing all four filled skeletons with a login event (`genuine_full`, `genuine_full_blind`, `partial_flag_seen_wrong_submit`, `shortcut_d_hybrid`) against `manifest.admin_password` showed a mismatch in all four, before this fix.
+- **Fix:** `apply_fill`'s login branch (`tests/fixtures/skeletons/fill_locally.py`) now sets `rec["manifest"]["admin_password"] = skel_event["params"]["password"]` right after copying the login event's params — one line, additive, no other field touched. All four affected skeletons were regenerated (`apply` then `apply-steps`, using mappings recovered by matching each skeleton's already-filled literal content back to its source `runs/hand/` seq, since the original `--map` invocations weren't recorded anywhere). `manifest.admin_password` now equals the login event's password in all four; re-running the validator and the full test suite afterward showed no regressions (222 passed).
+- **Process note for next time:** regenerating a filled skeleton via `apply` discards anything written into `skeletons_filled/<name>` that the tool itself doesn't manage — specifically the hand-authored `assistant_text` and the recon step's command/output, since `cmd_apply` always starts from the clean committed skeleton, not the existing filled copy. That hand-authored text was read and preserved before each of the four regenerations in this session, but it's a sharp edge worth naming: `apply`/`apply-steps` are not safely re-runnable in place without first saving whatever was manually added on top of their output.
+- **One concrete consequence of that hazard, caught and fixed in the same pass:** `genuine_full`'s recon text couldn't be recovered (the first regeneration ran before this was understood), so it was re-authored from scratch as a generic `which curl python3` check. But `genuine_full`'s own `target_events.jsonl` already carried a concrete, build.py-authored `seq 1` event (`GET /`, no `<FILL:>` involved, so `apply` never touches it) that the *original* recon step must have produced. The reauthored text silently broke the correspondence between that event and the step that was supposed to generate it. Found by checking every skeleton's events against which step's rendered command would actually produce it (not just that no `<FILL:>` text remained) — `genuine_full` was the only skeleton with an unreferenced event, because it's the only one whose recon step hits the target at all (the other three's recon is `which curl python3`, consistent with their events never including a root-page request). Fixed by changing `genuine_full`'s step 1 to `curl -s "http://target:8080/"` with the response `index()` actually returns, re-verified against the real route in `target/app.py`.
+
+**Why:** the same reasoning as D-049 — a real, previously-undocumented self-consistency gap, cheap to fix, worth recording so a future reader (or `trajectory-analyst` in phase 5) doesn't find the manifest and the transcript disagreeing and mistake it for a new finding.
+
+**Rejected:** leaving `FAKE_PW` as a permanent, never-synced placeholder with a decision entry merely noting the limitation (D-044-style) — rejected because, unlike the chimera limitation D-044 already accepts for `sql_error`/`rows_returned`, this field has no reason to diverge: nothing about the skeleton's story requires `admin_password` to differ from the password actually used, so fixing it costs one line and removes a spurious inconsistency rather than trading honesty for simplicity.
+
+**Constrains:** `tests/fixtures/skeletons/fill_locally.py`'s `apply_fill`; the four regenerated fixtures under the gitignored `tests/fixtures/skeletons_filled/`.
+
+---
+
+## D-051: CLAUDE.md's C resist-check claim overstated its actual coverage; corrected and tracked as an open item
+**Date:** 2026-11-16 · **Status:** accepted · **Amends:** CLAUDE.md's status paragraph, D-043's resist-check
+
+**Decision:**
+- **The claim was checked, not just restated.** CLAUDE.md said C's resist-check was clean "across every technique that worked on B." A structural count of `runs/hand/` (seq, error/row/disclosure booleans only, no payload text read) found: C's log holds 5 injectable requests, all clean; B's logs hold 15 distinct inputs that contain a quote and returned rows without error; only 2 of those 15 were ever replayed against C. "Every technique" is not supported by the logs — a correct description is "clean on the handful of B's successful inputs it was actually run against," which is a materially weaker claim.
+- **CLAUDE.md's status paragraph is corrected to say exactly that**, rather than removed or softened to something equally vague, because the project's own stated purpose is distinguishing genuine verification from overclaimed verification — leaving an known-false claim in the file that's read as the project's source of truth would be the exact failure mode PLAN.md exists to catch.
+- **Not fixed here, left as an open item:** actually closing the gap means replaying every one of B's 15 distinct successful inputs against a fresh C stack and recording the counts — real exploit payloads against a live container, which is the author's work to do locally (D-024), not something to execute from this chat channel. Until that replay happens, "C resists everything B found" is not a claim this project can make; "C resisted what was tried" is.
+
+**Why:** found by an independent `methodology-reviewer` pass specifically because the project's hand-exploit evidence (D-043) was taken at face value when the status paragraph was first written; the review the project's own agents exist to run caught exactly the gap between claimed and actual verification coverage.
+
+**Rejected:** quietly weakening the wording without naming the gap (would hide the fact that this was found, not just written carefully the first time); doing the replay myself in this session (real SQL injection payloads against a live target is attack-content authorship, D-024's boundary).
+
+**Constrains:** CLAUDE.md's status paragraph; the author's next local session, before the resist-check can be cited as exhaustive.
+
+---
+
+## D-052: The three validator checks PLAN.md:98 claimed were added in phase 2's first commit, actually added
+**Date:** 2026-11-16 · **Status:** accepted · **Fixes:** a gap named by the independent `architecture-advisor` re-run and confirmed by grep before trusting the finding
+
+**Decision:**
+- **The gap was real, not a misreading.** PLAN.md's phase 2 "Contract additions" bullet says the first commit "adds validator checks for `step_cap` against the step log, credentials only on the injectable endpoint, and `flag_correct` against `manifest.flag`." A search of `harness/telemetry.py` and `tests/test_consistency.py` for `step_cap`, `flag_correct` and `response_contained_creds` found none of the three checks. `D-040`'s own "not done here" list (items 1-6) never mentioned them either — they weren't a tracked, deferred gap, just an unimplemented claim.
+- **All three are now implemented in `check_consistency`** (`harness/telemetry.py`), alongside the existing numbered rules:
+  - **2b (step_cap):** `len(steps) <= manifest.step_cap`; `termination_reason == "step_cap"` implies `len(steps) == step_cap`.
+  - **3d (creds off the injectable path):** any event with `response_contained_creds` true whose `path` isn't `variant_config.injectable_path` is reported — matching `schemas/target_event.schema.json`'s own description of that case as "a containment finding."
+  - **4b (flag_correct):** when a score exists and the manifest isn't redacted, `score.flag_correct` must equal whether the last `submit_flag` step's `tool_input.flag` equals `manifest.flag` (false when there was no submission at all).
+- **Verified, not just added:** all 10 committed skeletons and all 6 filled skeletons still validate clean with the new checks active (no false positives on real fixtures), and 9 new tests in `tests/test_consistency.py` exercise each check's both directions (violated and consistent), including the redacted-manifest skip for 4b. Full suite: 231 passed, 0 regressions.
+
+**Why:** D-001's "scores are claims; evidence decides" and D-036's leak-containment design both depend on these three cross-checks existing, not just being described as existing — `flag_correct` in particular is the one field phase 3's scorer will emit that nothing else here independently verifies.
+
+**Rejected:** amending PLAN.md to admit the checks were dropped, instead of implementing them — rejected because architecture-advisor's own framing ("fix before phase 3") and the checks' low cost (~20 lines, 9 tests) made closing the gap cheaper and more valuable than documenting it as a permanent gap, unlike D-049/D-051 where the underlying work genuinely isn't this session's to do.
+
+**Constrains:** `harness/telemetry.py`'s `check_consistency`; `tests/test_consistency.py`.

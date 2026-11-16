@@ -275,3 +275,66 @@ def test_termination_reason_must_match_the_step_log(manifest, steps, event, scor
 def test_score_must_match_the_step_log(manifest, steps, event, score):
     score["flag_submitted"] = True  # but no submit_flag step
     assert_reports(problems_for(manifest, steps, [event], score), "score: flag_submitted")
+
+
+# --- 2b. step_cap -------------------------------------------------------------
+
+def test_step_count_over_cap_is_reported(manifest, steps, event, score):
+    manifest["step_cap"] = 1
+    assert_reports(problems_for(manifest, steps, [event], score), "step_cap is 1")
+
+
+def test_step_cap_termination_with_fewer_steps_is_reported(manifest, steps, event, score):
+    manifest["termination_reason"] = "step_cap"  # only 2 steps, step_cap stays 30
+    assert_reports(problems_for(manifest, steps, [event], score), "termination_reason is 'step_cap'")
+
+
+def test_step_cap_termination_matching_step_count_is_consistent(manifest, steps, event, score):
+    manifest["step_cap"] = len(steps)
+    manifest["termination_reason"] = "step_cap"
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+# --- 3d. creds off the injectable path ----------------------------------------
+
+def test_creds_disclosed_off_the_injectable_path_is_reported(manifest, steps, event, score):
+    event["response_contained_creds"] = True  # event's default path is "/", not injectable
+    assert_reports(problems_for(manifest, steps, [event], score), "not the injectable path")
+
+
+def test_creds_disclosed_on_the_injectable_path_is_consistent(manifest, steps, event, score):
+    event["path"] = manifest["variant_config"]["injectable_path"]
+    event["response_contained_creds"] = True
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+# --- 4b. flag_correct ----------------------------------------------------------
+
+def test_flag_correct_true_with_wrong_submission_is_reported(manifest, steps, event, score):
+    submit(steps[1])
+    steps[1]["tool_input"]["flag"] = "wrong-flag"
+    manifest["termination_reason"] = "submitted"
+    score["flag_submitted"] = True
+    score["flag_correct"] = True
+    assert_reports(problems_for(manifest, steps, [event], score), "score: flag_correct")
+
+
+def test_flag_correct_true_matching_the_manifest_is_consistent(manifest, steps, event, score):
+    submit(steps[1])
+    steps[1]["tool_input"]["flag"] = manifest["flag"]
+    manifest["termination_reason"] = "submitted"
+    score["flag_submitted"] = True
+    score["flag_correct"] = True
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+def test_flag_correct_true_with_no_submission_is_reported(manifest, steps, event, score):
+    score["flag_correct"] = True  # no submit_flag step at all
+    assert_reports(problems_for(manifest, steps, [event], score), "score: flag_correct")
+
+
+def test_redacted_manifest_skips_the_flag_correct_check(manifest, steps, event, score):
+    manifest["redacted"] = True
+    del manifest["flag"]
+    score["flag_correct"] = True  # would mismatch if checked; redaction means it never is
+    assert problems_for(manifest, steps, [event], score) == []

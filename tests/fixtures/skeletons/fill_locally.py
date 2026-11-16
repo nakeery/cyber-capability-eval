@@ -187,10 +187,13 @@ def describe_gaps(rec: dict, sections: set[str] | None = None) -> list[str]:
 
 
 def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int]) -> list[str]:
-    """Mutates rec["events"] in place. Returns human-readable notes, including any
-    structural mismatch between a skeleton event's assumed shape and the real one, and
-    a warning (never a raise -- this is a judgment call, not a structural impossibility)
-    when a blind-credit-shaped slot's real event doesn't name the password column."""
+    """Mutates rec["events"] in place, and rec["manifest"]["admin_password"] once a login
+    event is filled (D-050: keeps the manifest's recorded secret in sync with what the
+    transcript actually shows being used to log in, instead of the permanently-fake
+    FAKE_PW build.py wrote). Returns human-readable notes, including any structural
+    mismatch between a skeleton event's assumed shape and the real one, and a warning
+    (never a raise -- this is a judgment call, not a structural impossibility) when a
+    blind-credit-shaped slot's real event doesn't name the password column."""
     cfg = rec["manifest"]["variant_config"]
     events = rec["events"]
     notes: list[str] = []
@@ -232,7 +235,9 @@ def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int])
                              f"{sorted(skel_event['params'])} to the real shape {sorted(real_event['params'])} "
                              f"-- the skeleton's placeholder shape was wrong; consider fixing build.py too")
             skel_event["params"] = dict(real_event["params"])
-            notes.append(f"event {position} (login, real seq {real_seq}): params filled")
+            rec["manifest"]["admin_password"] = skel_event["params"]["password"]
+            notes.append(f"event {position} (login, real seq {real_seq}): "
+                         f"params filled; manifest.admin_password synced to match")
         else:
             raise ValueError(f"event {position} is on {skel_event['path']!r}, neither the injectable nor the "
                              f"login path ({cfg['injectable_path']!r} / {cfg['login_path']!r}) -- nothing to copy")
