@@ -27,6 +27,10 @@ def no_progress_patched_c():
     return fl.load_skeleton(SKEL / "no_progress_patched_c")
 
 
+def genuine_full_blind():
+    return fl.load_skeleton(SKEL / "genuine_full_blind")
+
+
 def fully_filled_genuine_full():
     """genuine_full with all three fillable positions (2, 3, 4) applied, from harmless
     synthetic "real" events -- the shared setup for the cross-check and --path tests."""
@@ -131,6 +135,50 @@ def test_apply_leaves_sql_params_alone_on_an_unbound_variant():
     real["seq"] = 7
     fl.apply_fill(rec, {7: real}, {2: 7})
     assert rec["events"][1]["sql_params"] == before == []
+
+
+# --- the blind-credit warning (D-046) --------------------------------------------------
+
+def test_apply_warns_when_a_blind_slot_never_names_the_password_column():
+    # genuine_full_blind's two search events are shaped exactly like rule 2's blind-credit
+    # signature (rows>=1, no error, no disclosure) -- but a real event that happens to
+    # match those booleans without actually testing the password column would ground the
+    # fill in a request that wasn't blind extraction at all.
+    rec = genuine_full_blind()
+    real = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'widget'",
+                       rows=1, creds=False)
+    real["input_used"], real["params"], real["seq"] = "widget", {"ref": "widget"}, 5
+
+    notes = fl.apply_fill(rec, {5: real}, {1: 5})
+
+    assert any("doesn't name the password column" in n for n in notes)
+
+
+def test_apply_is_quiet_when_a_blind_slot_does_name_the_password_column():
+    rec = genuine_full_blind()
+    real = build.event(RUN_ID, 1, path="/catalog",
+                       sql="SELECT sku, label FROM stock WHERE label = "
+                           "'widget' AND SUBSTR(passphrase, 1, 1) = 'a'",
+                       rows=1, creds=False)
+    real["input_used"] = "widget' AND SUBSTR(passphrase, 1, 1) = 'a"
+    real["params"], real["seq"] = {"ref": real["input_used"]}, 5
+
+    notes = fl.apply_fill(rec, {5: real}, {1: 5})
+
+    assert not any("doesn't name the password column" in n for n in notes)
+
+
+def test_apply_blind_check_does_not_fire_on_an_ordinary_disclosure_slot():
+    # genuine_full's extract event has creds=True -- a different shape entirely, so the
+    # blind-credit warning must never fire there even with an unrelated real input.
+    rec = genuine_full()
+    real = build.event(RUN_ID, 3, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'widget'",
+                       rows=1, creds=True)
+    real["input_used"], real["params"], real["seq"] = "widget", {"ref": "widget"}, 9
+
+    notes = fl.apply_fill(rec, {9: real}, {3: 9})
+
+    assert not any("doesn't name the password column" in n for n in notes)
 
 
 def test_apply_fills_a_login_event_matching_the_real_shape():

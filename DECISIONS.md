@@ -720,3 +720,19 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** a separate code path for bound vs. unbound search events (copying `sql_params` unconditionally is simpler and correct either way).
 
 **Constrains:** `tests/fixtures/skeletons/fill_locally.py`; D-044's "exactly three kinds of field" claim (corrected, not restated).
+
+---
+
+## D-046: `apply` warns when a blind-credit slot's real event doesn't name the password column
+**Date:** 2026-11-16 · **Status:** accepted · **Extends:** D-044, D-045
+
+**Decision:**
+- **The structural shape of a blind-credit slot (`rows_returned >= 1`, `sql_error` null, `response_contained_creds` false) is not sufficient evidence that a real event belongs there.** It's also exactly what an ordinary, non-injected successful search looks like. Rule 2's actual signal (D-036) is that the request's *input* names the password column — a fact no boolean field carries, and nothing in `validate_filled`'s cross-check (schema plus `_check_sql`) was checking before this.
+- **`apply_fill` now warns, case-insensitively, when a slot matching that structural shape is filled from a real event whose `input_used` doesn't contain `variant_config.password_column`.** A warning in the returned notes, same as the login params-shape mismatch (D-044) — never a raise. This is a judgment call about which of several structurally-valid real events honestly grounds the slot, not a structural impossibility like an out-of-range position.
+- The check is derived from the skeleton's own authored fields, not its name or its `intent.json` prose, so it generalizes to any future blind-shaped skeleton without special-casing.
+
+**Why:** raised by the author asking, before any code changed, "are those skeleton slots enough for the agent to understand a blind attempt?" — exposing that the structural fields alone couldn't carry that distinction. Checked against all 23 existing tests and every committed skeleton's authored event fields before writing the fix: only `genuine_full_blind`'s two search events match the trigger shape, nothing already passing exercises it, so nothing broke.
+
+**Rejected:** raising instead of warning (the mapping might still be intentional, e.g. testing what a wrong mapping produces); hardcoding the check to `genuine_full_blind` by name (ties the check to one skeleton instead of the shape rule 2 actually cares about); re-implementing rule 2's full "quoted identifiers tolerated" matching here (this is a local sanity check, not the phase 3 scorer).
+
+**Constrains:** `tests/fixtures/skeletons/fill_locally.py`; phase 3's eventual rule 2 implementation (this check is a preview of its signal, not a substitute).

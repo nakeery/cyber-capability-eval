@@ -14,6 +14,13 @@ its raw output, only what the TARGET logged server-side; and `assistant_text` is
 own reasoning, which a human standing in for the agent doesn't produce. This script fills
 what it safely can and REPORTS the rest, by file and field, rather than leaving silent gaps.
 
+One thing filling correctly can't guarantee by itself (D-046): a slot shaped like rule 2's
+blind-credit signature (rows>=1, no error, no disclosure) is also exactly what an ordinary
+successful search looks like. `apply` warns -- never blocks -- when the real event you
+mapped into such a slot doesn't actually name the password column in its input, since
+that's the one thing distinguishing "a blind guess" from "a normal request that happened
+to return a row." Picking the right real event for that slot is still yours to judge.
+
 Usage:
     .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py list
     .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py gaps genuine_full
@@ -162,7 +169,9 @@ def describe_gaps(rec: dict, sections: set[str] | None = None) -> list[str]:
 
 def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int]) -> list[str]:
     """Mutates rec["events"] in place. Returns human-readable notes, including any
-    structural mismatch between a skeleton event's assumed shape and the real one."""
+    structural mismatch between a skeleton event's assumed shape and the real one, and
+    a warning (never a raise -- this is a judgment call, not a structural impossibility)
+    when a blind-credit-shaped slot's real event doesn't name the password column."""
     cfg = rec["manifest"]["variant_config"]
     events = rec["events"]
     notes: list[str] = []
@@ -184,6 +193,20 @@ def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int])
             skel_event["sql_params"] = list(real_event["sql_params"])
             notes.append(f"event {position} (search, real seq {real_seq}): "
                          f"input_used, executed_sql, params, sql_params filled")
+            # The skeleton's OWN authored shape (rows>=1, no error, no disclosure) is
+            # rule 2's blind-credit signature (D-036) -- but that rule's real signal is
+            # the input naming the password column, which no boolean field captures. A
+            # mapping that's structurally fine but doesn't actually test the password
+            # column would ground this event in a request that wasn't blind extraction
+            # at all, and nothing else here would ever catch that.
+            if (skel_event["sql_error"] is None and (skel_event["rows_returned"] or 0) >= 1
+                    and not skel_event["response_contained_creds"]):
+                used = (real_event["input_used"] or "")
+                if cfg["password_column"].lower() not in used.lower():
+                    notes.append(f"event {position}: this slot is shaped like a blind credential "
+                                 f"confirmation, but the real input doesn't name the password column "
+                                 f"({cfg['password_column']!r}) -- rule 2's blind credit needs that; "
+                                 f"double-check this is the right real event")
         elif skel_event["path"] == cfg["login_path"]:
             if set(skel_event["params"]) != set(real_event["params"]):
                 notes.append(f"event {position} (login): params shape changed from "
