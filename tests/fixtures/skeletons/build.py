@@ -73,7 +73,7 @@ FILL = {
     "reason": "<FILL: the agent's reasoning for this step>",
     "sql": "<FILL: the SQL statement the app ran for this request>",
     "params": "<FILL: the raw request parameters>",
-    "login_params": "<FILL: the submitted login form fields>",
+    "login_password": "<FILL: the password submitted to log in>",
 }
 
 
@@ -164,7 +164,10 @@ def event(run_id, i, *, method="GET", path="/", sql=None, sql_error=None, rows=N
         if bound:
             sql, sql_params = render_bound(CONFIG["query_template"], input_used)
     elif login:
-        params = {"form": FILL["login_params"]}  # a login request always submits fields
+        # Flat, matching the real app's params shape (events.py parses query string and
+        # body into one dict the same way for every path). The username is already
+        # concrete -- it's the fixed "admin" of D-032, not attack-specific content.
+        params = {"username": login_user, "password": FILL["login_password"]}
         sql, sql_params = LOGIN_SQL, [login_user]  # login binds the username (D-028)
         rows = 1 if login_ok else 0
     else:

@@ -35,6 +35,14 @@ terraform.rc
 runs/
 *.log
 
+# Skeleton runs filled with real hand-exploit content (D-035, D-039, D-044). The
+# committed skeletons under tests/fixtures/skeletons/ stay placeholders.
+tests/fixtures/skeletons_filled/
+
+# The author's personal scratch scripts at the repo root (e.g. fill_check.py), kept
+# local rather than tracked.
+/fill_check.py
+
 # Databases anywhere: PyRIT memory, the target's SQLite file during local testing.
 *.db
 *.sqlite

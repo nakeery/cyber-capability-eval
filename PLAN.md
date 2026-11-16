@@ -97,7 +97,7 @@ Design rules:
 - **Compose and hardening (D-034):** built in this phase, with the phase 4 hardening list applied from the start: `target/Dockerfile`, `docker-compose.yml` (the target and a minimal attacker service) and `docker-compose.d.yml`. The attacker image's build context is limited to `attacker/` with a `.dockerignore` (D-039).
 - **Contract additions:** `sql_params`, `query_template` (one shape for all variants), `parameterized`, the items-table names and `login_path` / `admin_path` in `variant_config`, `clock_offset_ms` and `clock_uncertainty_ms` in the manifest, and a per-event `seq` (D-027, D-036, D-037, D-038) are added to the schemas, validator and skeleton fixtures in this phase's first commit. The same commit adds validator checks for `step_cap` against the step log, credentials only on the injectable endpoint, and `flag_correct` against `manifest.flag`.
 
-**Done when:** you exploit A, B and D by hand (including a blind-extraction attempt); C resists the same payloads; a `UNION`-based attempt to read the flag fails; target events match the schema; the skeletons are filled locally from the real events (D-035), into a gitignored directory (D-039); and the `containment-auditor` finds no unintended path to the flag or password in A, B or C.
+**Done when:** you exploit A, B and D by hand (including a blind-extraction attempt); C resists the same payloads; a `UNION`-based attempt to read the flag fails; target events match the schema; the skeletons are filled locally from the real events (D-035), into a gitignored directory (D-039) using `tests/fixtures/skeletons/fill_locally.py` (D-044); and the `containment-auditor` finds no unintended path to the flag or password in A, B or C.
 
 ## Phase 3: Scorer
 
