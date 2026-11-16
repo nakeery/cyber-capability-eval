@@ -1,10 +1,11 @@
 """Fill a committed skeleton's placeholders from one of your real hand-exploit runs (D-035,
 D-039, D-044). A local tool; its OUTPUT (the filled runs) is gitignored, never committed.
 
-What this script fills and why that's the whole scope: looking at build.py, exactly three
-kinds of field hold literal `<FILL: ...>` content tied to a real request, and nothing else
-does:
-    - an injectable-path event's `params[<param>]`, `input_used`, `executed_sql`
+What this script fills and why that's the whole scope: looking at build.py, only these
+kinds of field hold literal `<FILL: ...>` content tied to a real request:
+    - an injectable-path event's `params[<param>]`, `input_used`, `executed_sql`, and
+      (on a bound/parameterized variant only) `sql_params` -- render_bound puts the
+      same placeholder inside it
     - a login event's `params` (the submitted form fields)
 Everything else build.py marks as a placeholder -- a step's `tool_input.command`,
 `output_full`/`output_sent_to_model`, and every step's `assistant_text` -- has NO source
@@ -31,6 +32,12 @@ since the committed one is never modified (D-039). To check what's left in what 
 already filled, point it at that copy instead:
     .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py gaps genuine_full \\
         --path tests/fixtures/skeletons_filled/genuine_full
+
+`gaps --all` reports every committed skeleton at once, instead of needing a name -- an
+overview of what the whole set still needs. `--targets`/`--steps` narrow either form to
+just the target_events.jsonl gaps (what `apply --map` could still close) or just the
+steps.jsonl ones (what has no source and must be authored directly):
+    .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py gaps --all --targets
 """
 
 from __future__ import annotations
@@ -109,8 +116,13 @@ def _event_position(path: str) -> int | None:
     return int(path[1:path.index("]")]) + 1
 
 
-def describe_gaps(rec: dict) -> list[str]:
-    """Human-readable lines: what's still a placeholder, grouped by file, with why."""
+def describe_gaps(rec: dict, sections: set[str] | None = None) -> list[str]:
+    """Human-readable lines: what's still a placeholder, grouped by file, with why.
+
+    `sections`, when given, restricts this to a subset of {"manifest", "steps",
+    "events", "intent", "score"} -- e.g. {"events"} for --targets, {"steps"} for
+    --steps. None (the default) shows everything, same as before either flag existed.
+    """
     lines: list[str] = []
     fillable_positions: set[int] = set()
 
@@ -121,6 +133,8 @@ def describe_gaps(rec: dict) -> list[str]:
         ("intent", "intent.json", rec["intent"]),
         ("score", "score.json", rec["score"]),
     ):
+        if sections is not None and file_key not in sections:
+            continue
         fills = find_fills(container)
         if not fills:
             continue
@@ -164,7 +178,12 @@ def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int])
             skel_event["input_used"] = real_event["input_used"]
             skel_event["executed_sql"] = real_event["executed_sql"]
             skel_event["params"] = dict(real_event["params"])
-            notes.append(f"event {position} (search, real seq {real_seq}): input_used, executed_sql, params filled")
+            # On a bound (parameterized) variant, render_bound puts the input inside
+            # sql_params too -- a placeholder there is as real as one in input_used.
+            # Harmless to copy on an unbound variant: real_event["sql_params"] is [].
+            skel_event["sql_params"] = list(real_event["sql_params"])
+            notes.append(f"event {position} (search, real seq {real_seq}): "
+                         f"input_used, executed_sql, params, sql_params filled")
         elif skel_event["path"] == cfg["login_path"]:
             if set(skel_event["params"]) != set(real_event["params"]):
                 notes.append(f"event {position} (login): params shape changed from "
@@ -194,10 +213,28 @@ def cmd_list() -> None:
         print(name)
 
 
-def cmd_gaps(name: str | None, path: Path | None) -> None:
+def _print_gaps(label: str, rec: dict, sections: set[str] | None) -> None:
+    lines = describe_gaps(rec, sections)
+    print(f"{label}:\n" + ("\n".join(lines) if lines else "  nothing left -- every placeholder is filled"))
+
+
+def cmd_gaps(name: str | None, path: Path | None, *, show_all: bool = False,
+            sections: set[str] | None = None) -> None:
     """Defaults to the committed (always-placeholder) skeleton. --path points it at a
     filled copy instead -- e.g. tests/fixtures/skeletons_filled/<name> -- since gaps
-    never reads that location on its own (the committed skeleton is never modified)."""
+    never reads that location on its own (the committed skeleton is never modified).
+    --all ignores name/path and reports every committed skeleton, one after another --
+    an overview of what the whole set still needs, not just one. `sections` narrows
+    either case to just {"events"} (--targets) or {"steps"} (--steps)."""
+    if show_all:
+        if name is not None or path is not None:
+            raise SystemExit("--all can't be combined with a skeleton name or --path")
+        for index, skeleton_name in enumerate(list_skeletons()):
+            if index:
+                print()
+            _print_gaps(skeleton_name, load_skeleton(SKEL / skeleton_name), sections)
+        return
+
     if path is not None:
         skel_dir, label = path, str(path)
     elif name is not None:
@@ -205,11 +242,9 @@ def cmd_gaps(name: str | None, path: Path | None) -> None:
             raise SystemExit(f"no such committed skeleton: {name!r} (see `list`)")
         skel_dir, label = SKEL / name, name
     else:
-        raise SystemExit("gaps needs a skeleton name, --path, or both")
+        raise SystemExit("gaps needs a skeleton name, --path, or --all")
 
-    rec = load_skeleton(skel_dir)
-    lines = describe_gaps(rec)
-    print(f"{label}:\n" + ("\n".join(lines) if lines else "  nothing left -- every placeholder is filled"))
+    _print_gaps(label, load_skeleton(skel_dir), sections)
 
 
 def cmd_apply(name: str, run_path: Path, mapping: dict[int, int]) -> None:
@@ -255,6 +290,11 @@ def main(argv: list[str] | None = None) -> None:
     gaps.add_argument("name", nargs="?", help="a committed skeleton name (reads tests/fixtures/skeletons/<name>)")
     gaps.add_argument("--path", type=Path,
                       help="inspect this directory instead, e.g. tests/fixtures/skeletons_filled/<name>")
+    gaps.add_argument("--all", action="store_true",
+                      help="report every committed skeleton, one after another, instead of just one")
+    section = gaps.add_mutually_exclusive_group()
+    section.add_argument("--targets", action="store_true", help="show only target_events.jsonl gaps")
+    section.add_argument("--steps", action="store_true", help="show only steps.jsonl gaps")
     apply_p = sub.add_parser("apply")
     apply_p.add_argument("name", choices=list_skeletons())
     apply_p.add_argument("--run", required=True, type=Path, help="a saved runs/hand/<variant>/target-events-*.jsonl")
@@ -265,7 +305,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "list":
         cmd_list()
     elif args.command == "gaps":
-        cmd_gaps(args.name, args.path)
+        sections = {"events"} if args.targets else {"steps"} if args.steps else None
+        cmd_gaps(args.name, args.path, show_all=args.all, sections=sections)
     elif args.command == "apply":
         cmd_apply(args.name, args.run, _parse_mapping(args.map))
 

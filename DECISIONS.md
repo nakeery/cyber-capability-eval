@@ -690,6 +690,8 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 ## D-044: The skeleton fill is scoped to three fields; everything else is reported, not guessed
 **Date:** 2026-11-16 · **Status:** accepted · **Implements:** D-035, D-039
 
+*(The "exactly three kinds of field" claim below is corrected by D-045: a bound/parameterized variant's `sql_params` is a fourth. `apply_fill`'s behavior described here for the three it did handle is otherwise unchanged.)*
+
 **Decision:**
 - **`tests/fixtures/skeletons/fill_locally.py` fills exactly three kinds of field** from a real hand-exploit run, because inspecting `build.py` shows those are the only ones carrying literal, request-tied `<FILL: ...>` content: an injectable-path event's `params[<param>]`, `input_used` and `executed_sql`; a login event's `params` (the submitted form). Every structural field a skeleton's story depends on — `sql_error`, `rows_returned`, `response_contained_creds`/`flag`, `status`, `login_success`, `session_user` — is already concrete in the committed skeletons and is never touched, even when the real run's value differs.
 - **Two categories of placeholder have no source and are reported, never invented:** a step's `tool_input.command` and `output_full`/`output_sent_to_model` (hand_lab.py never records what was typed in the attacker shell or its raw output — only the target's own server-side log is saved); and every step's `assistant_text` (a model's reasoning, which a human standing in for the agent during the hand-exploit doesn't produce). `assistant_text` isn't attack content, so it can be authored directly rather than scripted.
@@ -703,3 +705,18 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** auto-matching real events to skeleton roles by heuristic (sql_error present → probe, creds present → extract); filling in place; overwriting structural fields from the real run; running the fill against real payloads myself.
 
 **Constrains:** `.gitignore`; the phase 2 exit sequence (D-035/D-039's timing is unchanged); `build.py`'s login event shape (fixed here) and the committed skeleton fixtures it produces.
+
+---
+
+## D-045: `sql_params` is a fourth fillable field on a bound variant; `gaps` gains `--all`, `--targets`, `--steps`
+**Date:** 2026-11-16 · **Status:** accepted · **Amends:** D-044
+
+**Decision:**
+- **`sql_params` is fillable too, but only on a bound (parameterized) variant's injectable-path event.** `sqltemplate.render_bound` puts the search input inside `sql_params`, not just `executed_sql`; on the committed skeletons that means `<FILL: ...>` ends up inside `sql_params` for `no_progress_patched_c` (variant C) specifically, which `apply_fill`'s search-event branch never copied. Fixed by always copying `sql_params` there — a no-op on an unbound variant (B, D), where it's already `[]`. Found by running `gaps --all` over every committed skeleton myself, not by inspection.
+- **`gaps` gains `--all`** (report every committed skeleton, not just one named — an overview of what the whole set still needs) **and `--targets`/`--steps`**, a mutually exclusive pair narrowing any `gaps` call (with or without `--all`) to just the `target_events.jsonl` gaps or just the `steps.jsonl` ones. `describe_gaps` takes an optional `sections` set; the CLI is the only thing that knows `--targets` means `{"events"}`.
+
+**Why:** the first version of `apply_fill` was written by reasoning about `build.py`'s unbound (B/D) events, where `sql_params` is always concrete. Running the new `--all` option over the full set — the kind of check this tool exists to make *other* people's assumptions submit to — immediately surfaced the gap on C, the one bound skeleton. A scoping claim verified against three of four variants, not run against the fourth, is exactly the kind of thing this project exists to catch, including in its own tooling.
+
+**Rejected:** a separate code path for bound vs. unbound search events (copying `sql_params` unconditionally is simpler and correct either way).
+
+**Constrains:** `tests/fixtures/skeletons/fill_locally.py`; D-044's "exactly three kinds of field" claim (corrected, not restated).

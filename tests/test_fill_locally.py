@@ -23,6 +23,10 @@ def genuine_full():
     return fl.load_skeleton(SKEL / "genuine_full")
 
 
+def no_progress_patched_c():
+    return fl.load_skeleton(SKEL / "no_progress_patched_c")
+
+
 def fully_filled_genuine_full():
     """genuine_full with all three fillable positions (2, 3, 4) applied, from harmless
     synthetic "real" events -- the shared setup for the cross-check and --path tests."""
@@ -101,6 +105,32 @@ def test_apply_fills_a_search_event_without_touching_structural_fields():
     for field in ("sql_error", "rows_returned", "response_contained_creds", "status", "method", "path"):
         assert after[field] == before[field], field
     assert any("event 2" in n for n in notes)
+
+
+def test_apply_fills_sql_params_on_a_bound_variant():
+    # Caught by running gaps --all myself: render_bound puts the placeholder inside
+    # sql_params too on a parameterized variant (C), which the search-event branch
+    # didn't copy. no_progress_patched_c is the one committed skeleton that's bound.
+    rec = no_progress_patched_c()
+    real = build.event(RUN_ID, 1, path="/catalog", bound=True, rows=0, creds=False)
+    real["executed_sql"], real["sql_params"] = build.render_bound(build.CONFIG["query_template"], "sample-c")
+    real["input_used"], real["params"], real["seq"] = "sample-c", {"ref": "sample-c"}, 5
+
+    notes = fl.apply_fill(rec, {5: real}, {1: 5})
+
+    assert rec["events"][0]["sql_params"] == ["sample-c"]
+    assert any("sql_params filled" in n for n in notes)
+    assert fl.validate_filled(rec) == []
+
+
+def test_apply_leaves_sql_params_alone_on_an_unbound_variant():
+    # Harmless no-op on B/D: the real event's sql_params is already [].
+    rec = genuine_full()
+    before = list(rec["events"][1]["sql_params"])
+    real = build.event(RUN_ID, 2, path="/catalog", sql="x", rows=0)
+    real["seq"] = 7
+    fl.apply_fill(rec, {7: real}, {2: 7})
+    assert rec["events"][1]["sql_params"] == before == []
 
 
 def test_apply_fills_a_login_event_matching_the_real_shape():
@@ -208,3 +238,43 @@ def test_gaps_rejects_an_unknown_committed_name():
 def test_gaps_requires_a_name_or_a_path():
     with pytest.raises(SystemExit, match="needs a skeleton name"):
         fl.cmd_gaps(None, None)
+
+
+# --- describe_gaps sections: --targets / --steps ---------------------------------------
+
+def test_describe_gaps_targets_only_omits_step_content():
+    text = "\n".join(fl.describe_gaps(genuine_full(), sections={"events"}))
+    assert "fillable: apply --map" in text
+    assert "agent's own reasoning" not in text and "steps.jsonl" not in text
+
+
+def test_describe_gaps_steps_only_omits_event_content():
+    text = "\n".join(fl.describe_gaps(genuine_full(), sections={"steps"}))
+    assert "agent's own reasoning" in text
+    assert "fillable: apply --map" not in text and "target_events.jsonl" not in text
+
+
+# --- gaps --all: every committed skeleton in one report --------------------------------
+
+def test_gaps_all_reports_every_committed_skeleton(capsys):
+    fl.cmd_gaps(None, None, show_all=True)
+    out = capsys.readouterr().out
+    for skeleton_name in fl.list_skeletons():
+        assert f"{skeleton_name}:" in out
+
+
+def test_gaps_all_rejects_a_name_or_path():
+    with pytest.raises(SystemExit, match="can't be combined"):
+        fl.cmd_gaps("genuine_full", None, show_all=True)
+    with pytest.raises(SystemExit, match="can't be combined"):
+        fl.cmd_gaps(None, Path("somewhere"), show_all=True)
+
+
+def test_gaps_all_respects_the_section_filter(capsys):
+    fl.cmd_gaps(None, None, show_all=True, sections={"targets_impossible_sentinel"})
+    out = capsys.readouterr().out
+    # No skeleton has a "manifest"/"intent"/"score" gap, so an unmatched section name
+    # should report every skeleton as fully clean -- confirms the filter is actually
+    # applied across --all, not just ignored.
+    assert "nothing left -- every placeholder is filled" in out
+    assert "fillable: apply --map" not in out and "agent's own reasoning" not in out
