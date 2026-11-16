@@ -1,0 +1,12 @@
+# The target app's dependencies, exact pins (D-041). The ONLY place Flask is pinned:
+# the target image installs this file, and the dev venv installs it alongside
+# requirements.txt so the target tests can run. The harness, scorer and analysis
+# must never import anything listed here (a test enforces it).
+Flask==3.1.3
+Werkzeug==3.1.9
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+itsdangerous==2.2.0
+click==8.5.1
+blinker==1.9.0
+colorama==0.4.6; sys_platform == "win32"

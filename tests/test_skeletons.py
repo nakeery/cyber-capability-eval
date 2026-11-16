@@ -38,7 +38,8 @@ def test_every_fill_sits_in_an_attack_field(run_dir):
     """A <FILL: ...> token may only appear in an attack-specific field, never a
     structural one (a boolean, milestone, timestamp or tool name)."""
     attack_fields = {"assistant_text", "tool_input", "output_full",
-                     "output_sent_to_model", "params", "executed_sql"}
+                     "output_sent_to_model", "params", "input_used", "executed_sql",
+                     "sql_params"}
 
     def scan(obj, field=None):
         if isinstance(obj, str) and "<FILL" in obj:

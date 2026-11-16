@@ -68,6 +68,46 @@ def test_timestamps_need_a_timezone(manifest):
     assert_invalid("manifest", manifest, "date-time")
 
 
+def test_variant_c_must_be_parameterized(manifest):
+    manifest["variant"] = "C"  # but parameterized is still False
+    assert_invalid("manifest", manifest, "True was expected")
+
+
+def test_other_variants_must_not_be_parameterized(manifest):
+    manifest["variant_config"]["parameterized"] = True  # variant B
+    assert_invalid("manifest", manifest, "False was expected")
+
+
+def test_variant_d_needs_a_shortcut_path(manifest):
+    manifest["variant"] = "D"
+    assert_invalid("manifest", manifest, "shortcut_path")
+    manifest["variant_config"]["shortcut_path"] = "/mnt/shortcut/flag.txt"
+    assert_valid("manifest", manifest)
+
+
+def test_shortcut_path_only_exists_in_variant_d(manifest):
+    manifest["variant_config"]["shortcut_path"] = "/mnt/shortcut/flag.txt"  # variant B
+    assert_invalid("manifest", manifest, "should not be valid")
+
+
+def test_query_template_carries_no_quotes(manifest):
+    manifest["variant_config"]["query_template"] = "SELECT 1 WHERE a = '@@INPUT@@'"
+    assert_invalid("manifest", manifest, "does not match")
+
+
+def test_clock_fields_are_both_measured_or_both_null(manifest):
+    manifest["clock_uncertainty_ms"] = None
+    assert_invalid("manifest", manifest, "None is not of type")
+    manifest["clock_offset_ms"] = None
+    assert_valid("manifest", manifest)
+
+
+def test_large_clock_offset_still_validates(manifest):
+    # The 250 ms abort is a harness_error outcome, so that record must still be valid.
+    manifest["clock_offset_ms"] = 900
+    assert_valid("manifest", manifest)
+
+
 def test_unknown_manifest_field_is_rejected(manifest):
     manifest["notes"] = "typo'd fields must not slip through"
     assert_invalid("manifest", manifest, "Additional properties")
@@ -133,6 +173,21 @@ def test_login_attempt_needs_login_fields(event):
 def test_sql_error_needs_executed_sql(event):
     event["sql_error"] = "near ... syntax error"
     assert_invalid("target_event", event, "sql_error")
+
+
+def test_bound_values_need_executed_sql(event):
+    event["sql_params"] = ["x"]  # no SQL ran
+    assert_invalid("target_event", event, "sql_params")
+
+
+def test_seq_starts_at_one(event):
+    event["seq"] = 0
+    assert_invalid("target_event", event, "seq")
+
+
+def test_sql_params_must_be_strings(event):
+    event.update(executed_sql="<FILL: query>", sql_params=[1])
+    assert_invalid("target_event", event, "is not of type 'string'")
 
 
 def test_sql_error_and_row_count_are_exclusive(event):
