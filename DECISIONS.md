@@ -853,3 +853,19 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** amending PLAN.md to admit the checks were dropped, instead of implementing them — rejected because architecture-advisor's own framing ("fix before phase 3") and the checks' low cost (~20 lines, 9 tests) made closing the gap cheaper and more valuable than documenting it as a permanent gap, unlike D-049/D-051 where the underlying work genuinely isn't this session's to do.
 
 **Constrains:** `harness/telemetry.py`'s `check_consistency`; `tests/test_consistency.py`.
+
+---
+
+## D-053: GitHub Actions runs the test suite on push to main and on every PR
+**Date:** 2026-11-16 · **Status:** accepted
+
+**Decision:**
+- **`.github/workflows/tests.yml`**: checkout, pin Python 3.13 (D-020), `pip install -r requirements.txt -r target/requirements.txt`, `pytest -q`. No services, no Docker, no secrets — the whole suite (231 tests) runs in-process (Flask's test client for the target app, synthetic records for the validator), confirmed by checking that no test file imports `boto3` or touches a live container.
+- **Scope, deliberately minimal:** just the test suite, not lint/type-check/coverage, matching the project's "depth over breadth" principle and keeping the workflow file itself simple enough to explain in an interview.
+- **Deferred:** phases 3+ add real Docker/Bedrock dependencies (the scorer, the harness, AWS smoke tests). Those tests will need to be skipped or mocked in CI rather than run for real, since CI has no AWS credentials and shouldn't start lab containers on a public runner; revisit this workflow when that code lands rather than trying to anticipate it now.
+
+**Why:** a solo-committer portfolio project doesn't strictly need CI (tests run locally before every commit), but it's a cheap, visible signal of practice on a repo meant to be reviewed, and it catches a regression that slips into a PR without a local test run first.
+
+**Rejected:** a more elaborate workflow (matrix testing, linting) now — nothing here needs it yet, and PLAN.md's own principle 7 argues against complexity the project doesn't need.
+
+**Constrains:** `.github/workflows/tests.yml`; revisit at phase 3/4.
