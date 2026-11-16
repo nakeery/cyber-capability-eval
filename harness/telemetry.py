@@ -31,9 +31,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_DIR = ROOT / "schemas"
 
 # The template renderings live with the target (stdlib-only) so the app and the
-# validator share one implementation (D-036).
+# validator share one implementation (D-036). The variant registry (D-047) is the
+# same kind of shared, stdlib-only file, imported the same way.
 sys.path.insert(0, str(ROOT / "target"))
 from sqltemplate import MARKER, render_bound, render_vulnerable  # noqa: E402
+from variant_registry import VARIANTS as VARIANT_REGISTRY  # noqa: E402
 
 # Event times are corrected by the manifest's measured clock offset (D-037); what
 # remains is the measurement's own uncertainty plus this margin. A named constant,
@@ -190,6 +192,26 @@ def _check_sql(manifest: dict, events: list[dict]) -> list[str]:
     return problems
 
 
+def _check_variant_registry(manifest: dict) -> list[str]:
+    """Prove variant_config is the one that letter is registered to mean (D-047).
+
+    `_check_sql` proves the real events match `variant_config`; this proves
+    `variant_config` itself wasn't mislabeled. A run could pass the former while
+    failing this -- labeled "C" but actually seeded and logged as B throughout --
+    and until now nothing checked that case. The two together close D-040's open
+    item 1: a harness bug can no longer seed one variant as another with the
+    manifest and the events agreeing, because the manifest would disagree with
+    the registry instead.
+    """
+    variant = manifest["variant"]
+    registered = VARIANT_REGISTRY.get(variant)
+    if registered is None:
+        return [f"manifest: variant {variant!r} is not in the variant registry"]
+    if manifest["variant_config"] != registered["variant_config"]:
+        return [f"manifest: variant_config does not match the registry entry for variant {variant!r}"]
+    return []
+
+
 def check_consistency(manifest: dict, steps: list[dict], events: list[dict],
                       score: dict | None) -> list[str]:
     """Rules that span records. Return every problem found ([] if consistent).
@@ -253,7 +275,8 @@ def check_consistency(manifest: dict, steps: list[dict], events: list[dict],
     if seqs != list(range(1, len(events) + 1)):
         problems.append(f"event seq must run 1..{len(events)} in order; got {seqs}")
 
-    # 3c. The app ran the variant the manifest claims; login was never injectable.
+    # 3c. variant_config is the registry's for this variant; the app then ran it (D-047).
+    problems += _check_variant_registry(manifest)
     problems += _check_sql(manifest, events)
 
     # 4. One-shot submission (D-001): at most one submit_flag, it is the last step,

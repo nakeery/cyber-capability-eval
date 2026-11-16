@@ -31,6 +31,14 @@ def genuine_full_blind():
     return fl.load_skeleton(SKEL / "genuine_full_blind")
 
 
+def shortcut_d_hybrid():
+    return fl.load_skeleton(SKEL / "shortcut_d_hybrid")
+
+
+def partial_creds_only():
+    return fl.load_skeleton(SKEL / "partial_creds_only")
+
+
 def fully_filled_genuine_full():
     """genuine_full with all three fillable positions (2, 3, 4) applied, from harmless
     synthetic "real" events -- the shared setup for the cross-check and --path tests."""
@@ -45,6 +53,51 @@ def fully_filled_genuine_full():
                         login_user="admin", login_ok=True, user="admin")
     login["params"], login["seq"] = {"username": "admin", "password": "sample-password"}, 12
     fl.apply_fill(rec, {7: probe, 9: extract, 12: login}, {2: 7, 3: 9, 4: 12})
+    return rec
+
+
+def fully_filled_shortcut_d_hybrid():
+    """Same idea as fully_filled_genuine_full, for the three fillable positions
+    (1, 2, 3) of the Variant D hybrid -- the admin event (4) ships concrete."""
+    rec = shortcut_d_hybrid()
+    probe = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-a'",
+                        sql_error="syntax error", rows=None)
+    probe["input_used"], probe["params"], probe["seq"] = "sample-a", {"ref": "sample-a"}, 7
+    extract = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-b'",
+                          rows=1, creds=True)
+    extract["input_used"], extract["params"], extract["seq"] = "sample-b", {"ref": "sample-b"}, 9
+    login = build.event(RUN_ID, 1, method="POST", path="/login", login=True,
+                        login_user="admin", login_ok=True, user="admin")
+    login["params"], login["seq"] = {"username": "admin", "password": "sample-password"}, 12
+    fl.apply_fill(rec, {7: probe, 9: extract, 12: login}, {1: 7, 2: 9, 3: 12})
+    return rec
+
+
+def fully_filled_partial_creds_only():
+    """partial_creds_only has no login event at all -- the shared setup for the
+    no-login-to-borrow-from warning."""
+    rec = partial_creds_only()
+    probe = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-a'",
+                        sql_error="syntax error", rows=None)
+    probe["input_used"], probe["params"], probe["seq"] = "sample-a", {"ref": "sample-a"}, 7
+    extract = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-b'",
+                          rows=1, creds=True)
+    extract["input_used"], extract["params"], extract["seq"] = "sample-b", {"ref": "sample-b"}, 9
+    fl.apply_fill(rec, {7: probe, 9: extract}, {1: 7, 2: 9})
+    return rec
+
+
+def fully_filled_genuine_full_blind():
+    """genuine_full_blind's two search events are clean and creds-free (rows=1, no
+    error, no disclosure) -- the blind-credit shape itself, not a plain disclosure."""
+    rec = genuine_full_blind()
+    first = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-a'",
+                        rows=1, creds=False)
+    first["input_used"], first["params"], first["seq"] = "sample-a", {"ref": "sample-a"}, 5
+    second = build.event(RUN_ID, 1, path="/catalog", sql="SELECT sku, label FROM stock WHERE label = 'sample-b'",
+                         rows=1, creds=False)
+    second["input_used"], second["params"], second["seq"] = "sample-b", {"ref": "sample-b"}, 6
+    fl.apply_fill(rec, {5: first, 6: second}, {1: 5, 2: 6})
     return rec
 
 
@@ -326,3 +379,100 @@ def test_gaps_all_respects_the_section_filter(capsys):
     # applied across --all, not just ignored.
     assert "nothing left -- every placeholder is filled" in out
     assert "fillable: apply --map" not in out and "agent's own reasoning" not in out
+
+
+# --- apply_step_fill: steps.jsonl's command/output, derived from this skeleton's own
+# already-filled data (never anything outside it) ---------------------------------------
+
+def test_role_of_recognizes_every_marker_build_py_writes():
+    for marker, role in fl._ROLE_MARKERS.items():
+        assert fl._role_of(f"<FILL: {marker}>") == role
+
+
+def test_role_of_rejects_an_unrecognized_placeholder():
+    with pytest.raises(ValueError, match="unrecognized"):
+        fl._role_of("<FILL: something nobody wrote a marker for>")
+
+
+def test_apply_steps_fills_the_full_chain():
+    rec = fully_filled_genuine_full()
+    notes = fl.apply_step_fill(rec, {2: 2, 3: 3, 4: 4, 5: 5})
+
+    probe, extract, login, admin = (rec["steps"][i] for i in (1, 2, 3, 4))
+    assert "sample-a" in probe["tool_input"]["command"]
+    assert probe["output_full"] == probe["output_sent_to_model"] == "Error: syntax error\n"
+
+    assert "sample-b" in extract["tool_input"]["command"]
+    assert "sample-password" in extract["output_full"]  # reused from the login event below
+
+    assert "sample-password" in login["tool_input"]["command"]
+    assert login["output_full"] == login["output_sent_to_model"] == "Login successful.\n"
+
+    assert admin["tool_input"]["command"].startswith("curl")
+    assert rec["manifest"]["flag"] in admin["output_full"]
+
+    assert len(notes) == 4  # one per filled step, no warnings
+    assert fl.validate_filled(rec) == []  # steps.jsonl content can't break the SQL cross-check
+
+
+def test_apply_steps_skips_recon():
+    rec = fully_filled_genuine_full()
+    before = dict(rec["steps"][0])
+    fl.apply_step_fill(rec, {2: 2, 3: 3, 4: 4, 5: 5})
+    assert rec["steps"][0] == before  # untouched: still its own <FILL:>
+
+
+def test_apply_steps_skips_a_step_already_filled_by_hand():
+    rec = fully_filled_genuine_full()
+    rec["steps"][1]["tool_input"]["command"] = "already written by hand"
+    fl.apply_step_fill(rec, {3: 3, 4: 4, 5: 5})  # no entry for step 2 -- would raise if it were touched
+    assert rec["steps"][1]["tool_input"]["command"] == "already written by hand"
+
+
+def test_apply_steps_warns_when_a_disclosure_has_no_login_event_to_borrow_from():
+    rec = fully_filled_partial_creds_only()
+    notes = fl.apply_step_fill(rec, {2: 1, 3: 2})
+    assert "credential-shaped columns" in rec["steps"][2]["output_full"]
+    assert any("no login event" in n for n in notes)
+
+
+def test_apply_steps_blind_role_reports_a_generic_row_count():
+    rec = fully_filled_genuine_full_blind()
+    rec["steps"] = rec["steps"][:3]  # only recon and the two blind probes; login/admin unmapped on purpose
+    fl.apply_step_fill(rec, {2: 1, 3: 2})
+    assert rec["steps"][1]["output_full"] == rec["steps"][2]["output_full"] == "1 row(s) returned.\n"
+
+
+def test_apply_steps_auto_fills_the_readfile_step():
+    rec = fully_filled_shortcut_d_hybrid()
+    notes = fl.apply_step_fill(rec, {2: 1, 3: 2, 4: 3, 6: 4})
+
+    readfile = rec["steps"][4]  # step 5
+    assert readfile["tool_input"]["command"] == "cat /mnt/shortcut/flag.txt"
+    assert readfile["output_full"] == readfile["output_sent_to_model"] == rec["manifest"]["flag"] + "\n"
+    assert any("readfile" in n for n in notes)
+    assert fl.validate_filled(rec) == []
+
+
+def test_apply_steps_rejects_a_map_entry_for_a_readfile_step():
+    rec = fully_filled_shortcut_d_hybrid()
+    with pytest.raises(ValueError, match="needs no --map entry"):
+        fl.apply_step_fill(rec, {2: 1, 3: 2, 4: 3, 5: 1, 6: 4})
+
+
+def test_apply_steps_rejects_a_role_missing_its_map_entry():
+    rec = fully_filled_genuine_full()
+    with pytest.raises(ValueError, match="needs a --map entry"):
+        fl.apply_step_fill(rec, {2: 2})  # steps 3, 4, 5 got no entry
+
+
+def test_apply_steps_rejects_an_unknown_seq():
+    rec = fully_filled_genuine_full()
+    with pytest.raises(ValueError, match="no event with seq"):
+        fl.apply_step_fill(rec, {2: 404})
+
+
+def test_apply_steps_rejects_an_unknown_step_number():
+    rec = fully_filled_genuine_full()
+    with pytest.raises(ValueError, match="doesn't have"):
+        fl.apply_step_fill(rec, {99: 2})

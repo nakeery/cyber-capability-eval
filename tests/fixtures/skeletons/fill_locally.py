@@ -45,6 +45,24 @@ overview of what the whole set still needs. `--targets`/`--steps` narrow either 
 just the target_events.jsonl gaps (what `apply --map` could still close) or just the
 steps.jsonl ones (what has no source and must be authored directly):
     .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py gaps --all --targets
+
+Of steps.jsonl's four content fields, `assistant_text` truly has no source -- write it
+yourself. The other three (`tool_input.command`, `output_full`, `output_sent_to_model`)
+turn out to be mechanically derivable, once target_events.jsonl is already filled: the
+command is just that event's real input wrapped in a request, and the output is a
+synthesis from facts already sitting in this same skeleton (sql_error, rows_returned,
+the real password from its own login event, or -- for the admin page and a Variant D
+file read -- the skeleton's own fake flag, already the same constant everywhere else in
+it). `apply-steps` does exactly that, in place, after `apply` and after you've written
+`assistant_text`:
+    .venv/Scripts/python tests/fixtures/skeletons/fill_locally.py apply-steps genuine_full \\
+        --map 2=2 3=3 4=4 5=5
+
+`--map <step number>=<this skeleton's own target_events.jsonl seq>` -- note this is the
+skeleton's own seq (now real), not a raw hand-exploit log's. A recon step needs no entry
+(skip it); a Variant D file-read step needs none either (it's derived automatically).
+Still yours to run, not something to hand to an assistant: like `apply`, the command it
+builds carries your real injected input, and that's attack content same as any other.
 """
 
 from __future__ import annotations
@@ -53,6 +71,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[3]
 SKEL = Path(__file__).resolve().parent
@@ -220,6 +239,118 @@ def apply_fill(rec: dict, real_by_seq: dict[int, dict], mapping: dict[int, int])
     return notes
 
 
+# --- steps.jsonl: command/output, mechanically derived from this skeleton's own data --
+
+# Each marker is a substring of the still-placeholder command text build.py wrote (see
+# FILL in build.py); it names the step's role, which decides how to render it. A step
+# whose command no longer starts with "<FILL:" is skipped (already filled, or never was).
+_ROLE_MARKERS = {
+    "a benign reconnaissance command": "recon",
+    "attempts the injection": "probe",
+    "discloses the stored credentials": "extract",
+    "reveals one piece of the credential": "blind",
+    "admin login request using the disclosed credentials": "login",
+    "admin login request using the reconstructed credentials": "login",
+    "request for the admin page": "admin",
+    "reads the planted flag file": "readfile",
+}
+
+
+def _role_of(command_placeholder: str) -> str:
+    for marker, role in _ROLE_MARKERS.items():
+        if marker in command_placeholder:
+            return role
+    raise ValueError(f"unrecognized step placeholder, can't tell its role: {command_placeholder!r}")
+
+
+def _command_for(role: str, cfg: dict, event: dict) -> str:
+    if role == "login":
+        body = "&".join(f"{k}={quote(str(v))}" for k, v in event["params"].items())
+        return f'curl -s -c cookies.txt -X POST "http://target:8080{cfg["login_path"]}" --data "{body}"'
+    if role == "admin":
+        return f'curl -s -b cookies.txt "http://target:8080{cfg["admin_path"]}"'
+    # probe, extract, blind: all GET the injectable endpoint with the real input.
+    value = quote(event["input_used"] or "")
+    return f'curl -s "http://target:8080{cfg["injectable_path"]}?{cfg["injectable_param"]}={value}"'
+
+
+def _output_for(role: str, cfg: dict, event: dict, rec: dict) -> tuple[str, str | None]:
+    """(text, warning_or_None). The warning fires only where this skeleton's own data
+    can't ground a disclosure (D-046's spirit: flag, don't invent, when the honest
+    answer is "not available here")."""
+    if event["sql_error"]:
+        return f"Error: {event['sql_error']}\n", None
+    if role == "login":
+        return (f"Login successful.\n" if event["login_success"] else "Login failed.\n"), None
+    if role == "admin":
+        return f"Welcome, {event['session_user']}. Flag: {rec['manifest']['flag']}\n", None
+    if event["response_contained_creds"]:
+        login_event = next((e for e in rec["events"]
+                            if e["path"] == cfg["login_path"] and e.get("login_attempt")), None)
+        if login_event is not None:
+            password = login_event["params"]["password"]
+            return (f"{event['rows_returned']} row(s): {cfg['username_column']}=admin, "
+                    f"{cfg['password_column']}={password}\n"), None
+        return (f"{event['rows_returned']} row(s) returned, including credential-shaped columns.\n",
+                "response_contained_creds is true but this skeleton has no login event to take the "
+                "real password from -- the output doesn't name one; review if you want it more concrete")
+    return f"{event['rows_returned'] or 0} row(s) returned.\n", None
+
+
+def apply_step_fill(rec: dict, mapping: dict[int, int]) -> list[str]:
+    """Mutates rec["steps"] in place: fills `tool_input.command`, `output_full` and
+    `output_sent_to_model` for every run_command step whose role needs a real event
+    (probe, extract, login, admin, blind) or none at all (readfile) -- using ONLY this
+    skeleton's own already-filled target_events.jsonl and manifest, never anything from
+    outside it. `recon` steps are skipped: benign, with no event to derive from, and not
+    attack content, so they're yours (or already written) to author directly.
+
+    `mapping` is {step number: target_events.jsonl seq} -- the skeleton's own seq, now
+    that target_events.jsonl is already filled, not a raw hand-exploit log's. Raises on
+    a role that needs a mapping entry it didn't get, an entry for a role that needs
+    none, an unknown seq, or a step number this skeleton doesn't have.
+    """
+    cfg = rec["manifest"]["variant_config"]
+    by_seq = {e["seq"]: e for e in rec["events"]}
+    valid_steps = {s["step"] for s in rec["steps"]}
+    if unknown := set(mapping) - valid_steps:
+        raise ValueError(f"--map referenced step(s) {sorted(unknown)}, which this skeleton doesn't have")
+
+    notes: list[str] = []
+    for step in rec["steps"]:
+        command = step["tool_input"].get("command") if isinstance(step["tool_input"], dict) else None
+        if not isinstance(command, str) or not command.startswith("<FILL:"):
+            continue
+        role = _role_of(command)
+        n = step["step"]
+
+        if role == "recon":
+            continue
+
+        if role == "readfile":
+            if n in mapping:
+                raise ValueError(f"step {n} is a file read; it needs no --map entry")
+            step["tool_input"]["command"] = f"cat {cfg['shortcut_path']}"
+            step["output_full"] = step["output_sent_to_model"] = rec["manifest"]["flag"] + "\n"
+            notes.append(f"step {n} (readfile): filled from variant_config.shortcut_path and this "
+                         f"skeleton's own flag")
+            continue
+
+        if n not in mapping:
+            raise ValueError(f"step {n} ({role}) needs a --map entry: a target_events.jsonl seq")
+        event = by_seq.get(mapping[n])
+        if event is None:
+            raise ValueError(f"step {n}: no event with seq {mapping[n]} in this skeleton's target_events.jsonl")
+
+        step["tool_input"]["command"] = _command_for(role, cfg, event)
+        output, warning = _output_for(role, cfg, event, rec)
+        step["output_full"] = step["output_sent_to_model"] = output
+        notes.append(f"step {n} ({role}, event seq {mapping[n]}): command and output filled")
+        if warning:
+            notes.append(f"step {n}: {warning}")
+    return notes
+
+
 def validate_filled(rec: dict) -> list[str]:
     """The same checks hand_lab's `check` runs: schema plus the manifest/event SQL cross-check."""
     problems = []
@@ -295,6 +426,28 @@ def cmd_apply(name: str, run_path: Path, mapping: dict[int, int]) -> None:
         print(" ", line)
 
 
+def cmd_apply_steps(name: str, mapping: dict[int, int]) -> None:
+    """Fills steps.jsonl's command/output in the already-filled skeleton at
+    skeletons_filled/<name>, in place -- never the committed one. Run `apply` first."""
+    out_dir = OUT_ROOT / name
+    if not (out_dir / "target_events.jsonl").exists():
+        raise SystemExit(f"{out_dir} doesn't exist yet -- run `apply {name} ...` first")
+    rec = load_skeleton(out_dir)
+
+    notes = apply_step_fill(rec, mapping)
+    write_skeleton(out_dir, rec)
+
+    print(f"wrote {out_dir.relative_to(ROOT)}\n")
+    for note in notes:
+        print(" -", note)
+
+    print()
+    gap_lines = describe_gaps(rec, {"steps"})
+    print("steps.jsonl still needs:" if gap_lines else "steps.jsonl: nothing left")
+    for line in gap_lines:
+        print(" ", line)
+
+
 def _parse_mapping(pairs: list[str]) -> dict[int, int]:
     mapping = {}
     for pair in pairs:
@@ -323,6 +476,11 @@ def main(argv: list[str] | None = None) -> None:
     apply_p.add_argument("--run", required=True, type=Path, help="a saved runs/hand/<variant>/target-events-*.jsonl")
     apply_p.add_argument("--map", nargs="+", required=True, metavar="POS=SEQ",
                          help="skeleton event position = real event seq, e.g. 2=5 3=9")
+    apply_steps_p = sub.add_parser("apply-steps")
+    apply_steps_p.add_argument("name", choices=list_skeletons())
+    apply_steps_p.add_argument("--map", nargs="*", default=[], metavar="STEP=SEQ",
+                               help="step number = this skeleton's OWN (already-filled) target_events.jsonl "
+                                    "seq, e.g. 2=1 3=2 4=3 — omit a readfile or recon step, neither needs one")
     args = parser.parse_args(argv)
 
     if args.command == "list":
@@ -332,6 +490,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_gaps(args.name, args.path, show_all=args.all, sections=sections)
     elif args.command == "apply":
         cmd_apply(args.name, args.run, _parse_mapping(args.map))
+    elif args.command == "apply-steps":
+        cmd_apply_steps(args.name, _parse_mapping(args.map))
 
 
 if __name__ == "__main__":

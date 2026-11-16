@@ -736,3 +736,49 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** raising instead of warning (the mapping might still be intentional, e.g. testing what a wrong mapping produces); hardcoding the check to `genuine_full_blind` by name (ties the check to one skeleton instead of the shape rule 2 actually cares about); re-implementing rule 2's full "quoted identifiers tolerated" matching here (this is a local sanity check, not the phase 3 scorer).
 
 **Constrains:** `tests/fixtures/skeletons/fill_locally.py`; phase 3's eventual rule 2 implementation (this check is a preview of its signal, not a substitute).
+
+---
+
+## D-047: A single variant registry in `target/`; the validator checks `variant_config` against it
+**Date:** 2026-11-16 · **Status:** accepted · **Amends:** D-040 (closes open item 1)
+
+*(Chosen by me, drafted at the author's request now that all four variants' real names are fixed and independently confirmed against live behavior this session (A: D-043; B/C/D: this session's hand-exploit logs and the filled skeletons' manifests). Implemented in the same session, including both "not done here" items below. The author has not yet seen this; flag any to reverse.)*
+
+**Decision:**
+- **The per-variant name table already exists twice, and nothing checks either copy against the manifest.** `harness/hand_lab.py` has its own `VARIANTS` + `ITEMS_COLUMNS` dict (D-043's "convenience copy"); `tests/fixtures/skeletons/build.py` has a second, separately-maintained `CONFIGS` dict. Both happen to agree today — this session's hand-exploit logs for B, C and D matched both — but nothing forces that. Worse, `harness/telemetry.py`'s `_check_sql` (D-036, D-028) only proves `manifest.variant_config` is *internally* consistent with the real events; it never checks that `variant_config` is the *right* config for `manifest.variant`. A harness bug that labeled a run `"C"` while seeding and logging B's vulnerable schema throughout would pass every existing check, because the manifest and the events would agree with each other — just not with what "C" is supposed to mean. This is exactly the gap D-040 item 1 named.
+- **New module `target/variant_registry.py`** (stdlib only, imported by path — same pattern as `sqltemplate.py`, D-040): one dict, keyed `"A"`/`"B"`/`"C"`/`"D"`, each value shaped exactly like a seed's top level (`variant_config` plus the seed-only `items_columns`, which D-040 already dropped from the manifest schema but which seeding still needs). Values are the ones already verified live this session: A per D-043; B, C and D sharing `stock`/`operators`/`handle`/`passphrase`, differing only in `parameterized` (C) and `shortcut_path` (D).
+- **It lives in `target/`, not `harness/`**, per D-040's own note that this "belongs with the target build" — and so the phase 4 harness has one place to build seeds from instead of inventing names itself.
+- **`harness/hand_lab.py` and `tests/fixtures/skeletons/build.py` both import it**, retiring their own copies. Two duplicate tables become one.
+- **`harness/telemetry.py` gains a check**: given `manifest.variant`, look it up in the registry and require `manifest.variant_config == registry[variant]["variant_config"]` exactly (an unknown `variant` value is its own problem). This runs alongside, not instead of, `_check_sql`'s existing event-vs-config checks — one proves the config is the right one for the claimed letter, the other proves the real behavior matches the config. Neither alone closes the gap; together they do.
+
+**Rejected:**
+- A third, new table for the validator to check against instead of consolidating the existing two — would make the drift problem worse, not better.
+- Putting the registry in `harness/` — contradicts D-040's own siting note and separates it from `sqltemplate.py`, its natural neighbor.
+- Trusting the harness to copy the registry entry into the manifest at write time, with no independent validator check — doesn't catch a bug in *which* registry key the harness selected, only a bug in transcription.
+
+**Done, in the same session:**
+1. `target/variant_registry.py` exists; `harness/hand_lab.py` and `tests/fixtures/skeletons/build.py` now derive their own `VARIANTS`/`CONFIGS` from it instead of holding a second copy each. `build.py`'s `CONFIGS.get(variant, CONFIG)` fallback (which silently gave a non-B/C/D variant B's names) became a direct `CONFIGS[variant]` lookup now that A is a real registry entry too — no skeleton currently uses "A", so this changed no committed fixture's behavior.
+2. `harness/telemetry.py` gained `_check_variant_registry`, run alongside `_check_sql` in `check_consistency`. Three new tests in `tests/test_consistency.py`: the registry-matching case stays clean, a manifest labeled `"C"` while `variant_config` is still B's is reported (the exact D-040 scenario, with no mismatched event needed to catch it), and an unknown variant letter is reported rather than raising `KeyError`.
+3. Re-validated all 10 committed skeletons and all 6 filled ones against the new check, plus the full suite: 210 passed, zero regressions.
+
+**Constrains:** `harness/hand_lab.py`, `tests/fixtures/skeletons/build.py`, `harness/telemetry.py`'s `_check_sql`/`check_consistency`; the phase 4 harness's seed construction.
+
+---
+
+## D-048: `steps.jsonl`'s command/output are derivable too; `apply-steps` fills them from a skeleton's own already-filled data
+**Date:** 2026-11-16 · **Status:** accepted · **Amends:** D-044
+
+*(Chosen by me, drafted and implemented in the same session the author asked whether this could be scripted.)*
+
+**Decision:**
+- D-044 said a step's `tool_input.command`, `output_full` and `output_sent_to_model` have "no source" in a hand-exploit run. True of a literal transcript — `hand_lab.py` never records what you typed or what the terminal printed — but once `apply` has already filled `target_events.jsonl`, the command is a near-exact reconstruction (the real `input_used`/`params`, wrapped in a request) and the output is a synthesis from facts already in that same skeleton (`sql_error`, `rows_returned`, the real password already sitting in its own login event, or the skeleton's own fake flag for the admin page and a Variant D file read). Neither needs anything from outside the skeleton's own already-filled files.
+- **`fill_locally.py` gains `apply-steps <name> --map STEP=SEQ`**, reading and writing only `skeletons_filled/<name>/` — no second file path, unlike `apply`, so steps and events can't come from different runs even by mistake. It reads each step's role off its own still-placeholder command text, maps the http-tied roles (probe/extract/login/admin/blind) from `--map`, and derives `readfile` automatically from `variant_config.shortcut_path` plus the skeleton's fake flag. `recon` is skipped: genuinely benign, with no event to derive from.
+- **When a disclosure event has no login event in the same skeleton to borrow a real password from** (`partial_creds_only`, which stops before login by design), it falls back to a generic, honest description and warns rather than inventing a credential-looking value.
+- Same boundary as `apply`: running it is the author's, since the command it builds carries the real injected input — attack content, same as any other.
+- `assistant_text` has no such derivation and stays directly authored (now done, for all six skeletons, same session).
+
+**Why:** tracing through what `apply` already fills showed D-044's "no source" framing was about a missing transcript, not a missing derivation — the real values needed were already sitting in each skeleton's own files.
+
+**Rejected:** inventing plausible-looking fake credentials when no real one exists to borrow (would make a structural gap look filled instead of flagging it); a shared secrets file as a second input (unnecessary — everything needed is already in the skeleton).
+
+**Constrains:** `tests/fixtures/skeletons/fill_locally.py`; `tests/test_fill_locally.py`.

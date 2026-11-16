@@ -218,6 +218,26 @@ def test_template_must_not_name_the_password_column(manifest, steps, event, scor
     assert_reports(problems_for(manifest, steps, [event], score), "password column")
 
 
+# --- 3c cont'd: variant_config matches the registry, not just the events (D-047) --
+
+def test_variant_config_matching_the_registry_is_consistent(manifest, steps, event, score):
+    # conftest's manifest is already B's exact registered config.
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+def test_mislabeled_variant_is_reported_even_with_no_mismatched_events(manifest, steps, event, score):
+    # A harness bug: labeled C, but variant_config (and everything the app did) is
+    # still B's. _check_sql alone would see nothing wrong, since nothing here is
+    # internally inconsistent -- only the registry knows "C" means parameterized.
+    manifest["variant"] = "C"
+    assert_reports(problems_for(manifest, steps, [event], score), "does not match the registry")
+
+
+def test_unknown_variant_is_reported_not_crashed(manifest, steps, event, score):
+    manifest["variant"] = "Z"
+    assert_reports(problems_for(manifest, steps, [event], score), "not in the variant registry")
+
+
 # --- 4. one-shot submission (D-001) ------------------------------------------
 
 def submit(step):

@@ -21,8 +21,10 @@ def test_every_variant_yields_a_seed_the_target_accepts(variant):
     assert ("shortcut_path" in seed["variant_config"]) is (variant == "D")
 
 
-@pytest.mark.parametrize("variant", "BCD")
-def test_b_c_d_match_the_skeleton_builder(variant):
+@pytest.mark.parametrize("variant", "ABCD")
+def test_all_variants_match_the_skeleton_builder(variant):
+    # Both now derive from target/variant_registry.py (D-047); this catches a
+    # mistake in either module's own derivation, not just a copy-paste drift.
     assert hand_lab.VARIANTS[variant] == build.CONFIGS[variant]
 
 
