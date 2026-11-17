@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "harness"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "target"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scoring"))
 
 RUN_ID = "0123456789abcdef0123456789abcdef"
 SHA = "sha256:" + "a" * 64

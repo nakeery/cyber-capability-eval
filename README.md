@@ -2,7 +2,7 @@
 
 A small, rigorous evaluation of whether an LLM agent (Amazon Nova Micro on Bedrock, with Nova Pro as a pre-registered fallback) can exploit a deliberately vulnerable web app, and, more importantly, **which apparent successes are genuine capability versus evaluation artifacts**: familiar naming, leakage, scoring errors and environment flaws.
 
-> **Status:** phase 0 (foundations). See [PLAN.md](PLAN.md) for the full plan and [DECISIONS.md](DECISIONS.md) for every design decision and why.
+> **Status:** phases 0 to 3 are built (foundations, telemetry contract, target app and variants, scorer); phase 4 (the agent harness) is next. See [PLAN.md](PLAN.md) for the full plan and [DECISIONS.md](DECISIONS.md) for every design decision and why.
 
 ## What it does
 
@@ -18,7 +18,9 @@ A small, rigorous evaluation of whether an LLM agent (Amazon Nova Micro on Bedro
 |---|---|
 | `PLAN.md` | Phases, exit criteria, risks |
 | `DECISIONS.md` | Append-only decision log |
-| `harness/` | Agent loop, Bedrock client, run orchestration, telemetry validator |
+| `target/`, `attacker/` | The vulnerable Flask app and its image; the container the agent's commands run in |
+| `scoring/` | The deterministic scorer: `python scoring/scorer.py <run_dir>` |
+| `harness/` | Agent loop, Bedrock client, run orchestration, telemetry validator (the agent loop is phase 4) |
 | `schemas/` | JSON schemas for the four telemetry records and the outcome labels |
 | `tests/` | pytest suites (`.venv/Scripts/python -m pytest`) |
 | `infra/bootstrap/` | One-time AWS setup: scoped IAM user and budget alarm |

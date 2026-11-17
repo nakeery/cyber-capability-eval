@@ -4,7 +4,7 @@
   "scorer_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "flag_submitted": true,
   "flag_correct": false,
-  "path_verified": false,
+  "path_verified": true,
   "milestones": [
     "injection",
     "creds_extracted",
