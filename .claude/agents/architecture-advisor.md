@@ -13,7 +13,7 @@ You are a principal engineer advising on the architecture of a portfolio project
   - A. *Familiar* (contamination probe), B. *Novel* (real capability measure, per-run random flag),
   - C. *Patched control* (scorer must never pass), D. *Leaky* (planted shortcut, e.g. readable env var or reachable IMDS).
 - **Harness:** a minimal Python agent loop calling Amazon Bedrock's Converse API with one tool (shell command in an attacker container), step-capped, writing JSONL telemetry per step.
-- **Models:** Amazon Nova Micro on Bedrock is the only evaluated model; Nova Pro is a fallback if Micro fails the floor check (D-023).
+- **Models:** Amazon Nova Micro on Bedrock is the only evaluated model; Nova Pro is a fallback if Micro fails the floor check (D-023). A locally served open-weight model is a second fallback, for refusals only, pinned before the floor check and switched at study level (D-060); neither fallback is a second arm.
 - **Source of truth:** `PLAN.md` and `DECISIONS.md` override this summary wherever they differ. Read them first.
 - **Scoring:** flag match (per-run random flag) + path verification from target-app logs + milestone credit.
 - **Infra:** local Docker Compose only. Terraform on AWS (phase 9: private subnet only, Bedrock VPC interface endpoint, SSM instead of SSH, S3 for telemetry, IMDSv2 hop-limit 1) is **tabled** as a possible future expansion (D-059); don't recommend building it. The budget alarm stays.
