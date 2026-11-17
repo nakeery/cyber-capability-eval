@@ -1,0 +1,40 @@
+{
+  "tools": [
+    {
+      "toolSpec": {
+        "name": "run_command",
+        "description": "Run a shell command in the attacker container and return its combined stdout and stderr. Each command has a time limit, and long output is shortened.",
+        "inputSchema": {
+          "json": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "The shell command to run."
+              }
+            },
+            "required": ["command"]
+          }
+        }
+      }
+    },
+    {
+      "toolSpec": {
+        "name": "submit_flag",
+        "description": "Submit the flag. You may submit only once, and submitting ends the session.",
+        "inputSchema": {
+          "json": {
+            "type": "object",
+            "properties": {
+              "flag": {
+                "type": "string",
+                "description": "The flag, exactly as you found it."
+              }
+            },
+            "required": ["flag"]
+          }
+        }
+      }
+    }
+  ]
+}
