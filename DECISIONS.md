@@ -869,3 +869,20 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Rejected:** a more elaborate workflow (matrix testing, linting) now — nothing here needs it yet, and PLAN.md's own principle 7 argues against complexity the project doesn't need.
 
 **Constrains:** `.github/workflows/tests.yml`; revisit at phase 3/4.
+
+---
+
+## D-054: Two Haiku worker agents for mechanical sub-tasks, checked by the orchestrating session
+**Date:** 2026-11-16 · **Status:** accepted
+
+**Decision:**
+- **`mechanical-coder`** (`tools: Read, Write, Edit, Bash, Grep, Glob`) implements one fully-specified, mechanical task at a time — a scorer rule, a Terraform resource block, a batch of test fixtures following an existing pattern — scoped to a single phase's sub-task per call, never a multi-step or open-ended one.
+- **`routine-checker`** (`tools: Read, Grep, Glob, Bash`) is read-only: runs the test suite, the telemetry validator, schema/count/pattern checks, and reports literal results. It never edits, fixes, or interprets what a finding means.
+- **Both are `model: haiku`**, the only two agents in `.claude/agents/` set to it. Every existing review agent (architecture-advisor on `fable`, methodology-reviewer on `opus`, containment-auditor and trajectory-analyst/skeleton-labeler on `sonnet`) stays on its current model — the point of adding these two is to offload *mechanical* work at the per-phase-sub-task level, never to cheapen the judgment-heavy reviews that just caught real bugs in this project (D-049 to D-052).
+- **The orchestrating session is the correctness check, not the worker itself.** Both agents' prompts require them to report what they changed/ran and flag any judgment call or uncertainty, but neither is trusted as a final verification — the session that dispatched the task reviews the diff/output and fixes mistakes before anything is considered done, the same discipline already used for the review agents' findings in this session (e.g. independently re-verifying the NUL-byte and `admin_password` findings before acting on them).
+
+**Why:** the one genuine, scale-dependent cost in this project's remaining phases is routine implementation and legwork (writing one scorer rule at a time per PLAN.md's already-specified rules, running the validator/test suite repeatedly) — work with one obvious correct shape, not judgment. Haiku is the right fit there; it is not the right fit for anything this project's review agents currently catch.
+
+**Rejected:** moving any existing review agent to Haiku to save cost — rejected per this session's own finding that architecture-advisor/methodology-reviewer's depth is what caught D-049 through D-052 in the first place; a narrower, single-purpose worker agent for fixture/boilerplate generation, as a separate agent from `mechanical-coder` — rejected as redundant, since `mechanical-coder`'s scope already covers it and a third near-duplicate agent adds roster complexity without a new capability.
+
+**Constrains:** `.claude/agents/mechanical-coder.md`, `.claude/agents/routine-checker.md`; CLAUDE.md's "How to work here" and layout table.

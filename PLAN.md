@@ -264,4 +264,4 @@ Write down and **commit before the main run**:
 
 ## Decisions
 
-All design decisions are recorded in `DECISIONS.md` (D-001 to D-053), all accepted.
+All design decisions are recorded in `DECISIONS.md` (D-001 to D-054), all accepted.

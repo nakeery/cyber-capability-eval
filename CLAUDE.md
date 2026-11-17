@@ -19,6 +19,7 @@ Phases 0 (foundations) and 1 (telemetry contract) are on `main` (PR #1 merged). 
 - **Commit only when the user asks.** Branch for new work; `main` is the integration branch. Scan staged files for secrets before every commit.
 - **Implement code yourself and explain it** in insight blocks. Do **not** leave `TODO(human)` sections or "Learn by Doing" exercises — the user has asked for walkthroughs at a later date instead.
 - Tests: `.venv/Scripts/python -m pytest`. Python 3.13; dependencies pinned in requirements.txt.
+- **Mechanical work can go to `mechanical-coder`/`routine-checker` (Haiku, D-054), one precisely-specified sub-task per call, scoped to a single phase's work at a time.** The orchestrating session is the one that verifies and fixes their output — never trust a Haiku worker's report as the last check. Judgment-heavy work (design, methodology, containment, labeling) stays on the existing review agents; don't move it to a worker agent to save tokens.
 
 ## Safety note (important)
 
@@ -46,4 +47,4 @@ The user's email and AWS account ID are private. Never put them in external requ
 | `docker-compose.yml`, `docker-compose.d.yml` | The internal-only lab network; the D override adds one read-only flag volume |
 | `tests/` | pytest suites; `tests/fixtures/skeletons/` holds the placeholder fake runs and `fill_locally.py` (D-044) |
 | `infra/bootstrap/` | One-time AWS setup (scoped IAM user, budget) |
-| `.claude/agents/` | Review agents: architecture-advisor, methodology-reviewer, containment-auditor, trajectory-analyst, skeleton-labeler |
+| `.claude/agents/` | Review agents (read-only, judgment-heavy): architecture-advisor, methodology-reviewer, containment-auditor, trajectory-analyst, skeleton-labeler. Worker agents (Haiku, mechanical work, D-054): mechanical-coder, routine-checker |
