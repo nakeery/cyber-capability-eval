@@ -593,6 +593,21 @@ def test_preflight_judges_the_running_containers_not_only_the_compose_file():
         box.preflight()
 
 
+def test_preflight_fails_when_the_containers_main_process_runs_as_the_agent():
+    # The file and every other live check say fine; only comparing the live container's user with the user the
+    # probe measured inside the agent's own process can see that the agent could stop its own container (D-075).
+    def respond(argv):
+        if argv[1] == "inspect" and "--format" not in argv and argv[2] == ATTACKER:
+            info = good_inspect("attacker", "B", PROJECT)
+            info["Config"]["User"] = "10002:10002"
+            return 0, json.dumps([info]).encode(), b""
+        return preflight_responder()(argv)
+
+    box, _ = make_box(respond)
+    with pytest.raises(HarnessError, match="both run as user 10002"):
+        box.preflight()
+
+
 def test_preflight_fails_when_a_container_cannot_be_inspected():
     def respond(argv):
         if argv[1] == "inspect" and "--format" not in argv:

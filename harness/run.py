@@ -199,8 +199,9 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
             state.health_start = "healthy"
 
             def health() -> bool:
-                # After every command: first the attacker (a dead or wedged one would otherwise show up as
-                # ordinary steps full of Docker's own error text, which the model must never be shown), then
+                # After every command: first the attacker (a DEAD one would otherwise show up as ordinary steps
+                # full of Docker's own error text, which the model must never be shown; a wedged one, still
+                # running with no free process slot, is NOT seen by this check: D-075), then
                 # the target, retried because a single refused connection from a busy single-threaded server
                 # is not an outage (D-065).
                 if not lab.attacker_running():

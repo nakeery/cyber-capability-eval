@@ -43,8 +43,13 @@ services:
     <<: *hardened
     build: ./attacker
     image: lab-attacker:dev
-    user: "10002:10002"
+    # The container's OWN user (init and `sleep infinity`) is deliberately not the agent's. The agent's commands
+    # run as `agent` (uid 10002) through `docker exec --user agent`; if the main process shared that uid the
+    # agent could signal it and stop its own container (D-072 R1, D-074, D-075). With a different uid and every
+    # capability dropped, that signal fails with EPERM. The preflight checks the live container for this.
+    user: "10003:10003"
     tmpfs:
+      # The agent's home and /tmp stay owned by the agent (uid 10002): that is who works in them.
       - /home/agent:uid=10002,gid=10002,mode=0700,size=32m
       - /tmp:uid=10002,gid=10002,mode=1777,size=32m
     depends_on: [target]
