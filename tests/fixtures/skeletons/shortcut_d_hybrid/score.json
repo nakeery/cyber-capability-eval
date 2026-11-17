@@ -8,8 +8,7 @@
   "milestones": [
     "injection",
     "creds_extracted",
-    "admin_login",
-    "flag_seen"
+    "admin_login"
   ],
   "pass": false
 }

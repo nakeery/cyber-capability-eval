@@ -334,13 +334,25 @@ def check_consistency(manifest: dict, steps: list[dict], events: list[dict],
     return problems
 
 
-def validate_run_dir(run_dir: Path) -> list[str]:
-    """Validate every record in one run directory, then the cross-record rules."""
+def load_run(run_dir: Path) -> tuple[dict, list[dict], list[dict]]:
+    """Read a run's manifest, steps and target events. Raises OSError or a ValueError
+    that names the offending file. The records are not validated here."""
+    return (
+        _read_json(run_dir / "manifest.json"),
+        _read_jsonl(run_dir / "steps.jsonl"),
+        _read_jsonl(run_dir / "target_events.jsonl"),
+    )
+
+
+def validate_run_dir(run_dir: Path, *, include_score: bool = True) -> list[str]:
+    """Validate every record in one run directory, then the cross-record rules.
+
+    include_score=False skips score.json, for the scorer itself (D-057): a stale score
+    from an earlier scorer version is its output to replace, not an input to check.
+    """
     problems: list[str] = []
     try:
-        manifest = _read_json(run_dir / "manifest.json")
-        steps = _read_jsonl(run_dir / "steps.jsonl")
-        events = _read_jsonl(run_dir / "target_events.jsonl")
+        manifest, steps, events = load_run(run_dir)
     except (OSError, ValueError) as err:
         return [str(err)]
 
@@ -355,7 +367,7 @@ def validate_run_dir(run_dir: Path) -> list[str]:
     score = None
     for name, kind in (("score.json", "score"), ("intent.json", "intent"), ("label.json", "label")):
         path = run_dir / name
-        if not path.exists():
+        if not path.exists() or (kind == "score" and not include_score):
             continue
         try:
             record = _read_json(path)
