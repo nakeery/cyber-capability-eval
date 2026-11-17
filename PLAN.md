@@ -38,7 +38,7 @@ model_eval/
 ├── pyrit_adapter/           # optional: PyRIT target, scorer, importer (phase 4b)
 ├── results/                 # curated, committed results (no secrets)
 ├── runs/                    # raw telemetry, PyRIT memory DB (git-ignored)
-├── infra/                   # Terraform (phase 9, optional)
+├── infra/                   # bootstrap/: one-time AWS setup (IAM user, budget). Terraform is tabled (D-059)
 ├── docker-compose.yml       # A, B, C topology (no shared volumes)
 └── docker-compose.d.yml     # Variant D override only
 ```
@@ -222,13 +222,15 @@ Write down and **commit before the main run**:
    - The primary result first, with its interval and the minimum detectable effect, including if it's inconclusive.
    - Results table, label breakdown, 2–3 annotated trajectories (one genuine, one shortcut, one hallucinated).
    - A vs. B described as **familiar vs. novel naming**, not as contamination.
-   - **Threats to validity:** sample size, a single vulnerability class, step cap and context budget, temperature, model version drift, labeler error, prompt sensitivity (with phase 7b data if available), the 8 KB request cap, and a target log that covers only requests that reached the app (D-042).
+   - **Threats to validity:** sample size, a single vulnerability class, step cap and context budget, temperature, model version drift, labeler error, prompt sensitivity (with phase 7b data if available), the 8 KB request cap, a target log that covers only requests that reached the app (D-042), and a single local host (Docker Desktop on Windows) with no second-environment replication (D-059).
    - If phase 4b is done, a short section on how PyRIT was used and where it stopped fitting.
-   - **What I'd do next.**
+   - **What I'd do next.** The tabled cloud deployment (phase 9) is a candidate.
 
 **Done when:** the `methodology-reviewer` finds no claim in the report that the data can't support.
 
-## Phase 9 (optional): Terraform on AWS
+## Phase 9 (tabled): Terraform on AWS
+
+> **Tabled (D-059).** The lab stays local and containerized, and nothing else in the plan waits on this phase. It may return as a future expansion. The design below has not been built or re-reviewed since the plan was written, so re-verify the AWS specifics against current documentation before using it. Tabling it also drops the IMDS extension to Variant D (D-007), and the cloud re-run in its last bullet.
 
 - **Network:** a private-subnet-only VPC with no internet gateway, no NAT and no `0.0.0.0/0` route.
 - **Endpoints:** interface endpoints for `bedrock-runtime`, `ssm` and `ssmmessages` (no `ec2messages` with SSM Agent ≥ 3.3.40.0); `ecr.api` and `ecr.dkr` for pulling images by digest (or bake them into the AMI); an S3 gateway endpoint. Every endpoint has a **policy naming the lab role** (`aws:PrincipalArn`), never `*`. The Bedrock endpoint policy allows only the two model ARNs. Endpoint security groups allow 443 from the host only.
@@ -247,8 +249,8 @@ Write down and **commit before the main run**:
 
 | After phase | Agent |
 |---|---|
-| 1, 4, 4b, 9 | `architecture-advisor` |
-| 2, 4, 9 | `containment-auditor` |
+| 1, 4, 4b (and 9, if revived) | `architecture-advisor` |
+| 2, 4 (and 9, if revived) | `containment-auditor` |
 | 3, 5, 6, 8 | `methodology-reviewer` |
 | 5, 7 | `trajectory-analyst` |
 
@@ -269,9 +271,9 @@ Write down and **commit before the main run**:
 | Model or code changes mid-experiment | Pinned in-region model IDs; frozen commits and digests; randomized-block order; success by time block |
 | The LLM labeler mislabels or is prompt-injected | Pilot validation; delimited input; injection-string flagging; stratified hand-check |
 | PyRIT API changes or bugs | Pinned 1.1.0; off the critical path |
-| Infrastructure work crowds out the evaluation | Terraform is last and optional |
+| Infrastructure work crowds out the evaluation | The lab stays local; Terraform is tabled (D-059) |
 | Bedrock spend overruns | Budget alarm from phase 0; context budget per run; cost estimate from the pilot |
 
 ## Decisions
 
-All design decisions are recorded in `DECISIONS.md` (D-001 to D-054), all accepted.
+All design decisions are recorded in `DECISIONS.md` (D-001 to D-059), all accepted.
