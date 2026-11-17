@@ -70,10 +70,10 @@ def test_tools_are_exactly_the_two_strict_tools():
 
 def test_messages_hold_every_fixed_text():
     messages = json.loads(read("messages.json"))
-    assert set(messages) == {"submit_flag_reply", "truncation_marker", "timeout_notice", "errors"}
+    assert set(messages) == {"submit_flag_reply", "truncation_marker", "timeout_notice", "empty_output_notice", "errors"}
     assert set(messages["errors"]) == MALFORMED_CAUSES
     texts = [messages["submit_flag_reply"], messages["truncation_marker"], messages["timeout_notice"],
-             *messages["errors"].values()]
+             messages["empty_output_notice"], *messages["errors"].values()]
     assert all(isinstance(t, str) and t.strip() for t in texts)
 
 

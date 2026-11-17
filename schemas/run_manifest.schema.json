@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "run_id", "redacted", "variant", "variant_config", "condition",
-    "prompt_variant_id", "model_id", "region", "inference_config", "system_prompt_hash",
+    "prompt_variant_id", "model_id", "inference_config", "system_prompt_hash",
     "hint_text", "step_cap", "image_digests", "harness_commit", "docker_version",
     "run_order_seed", "clock_offset_ms", "clock_uncertainty_ms", "started_at", "ended_at", "target_health_start", "target_health_end",
     "container_exit_codes", "api_retries", "termination_reason", "harness_error"
@@ -59,7 +59,42 @@
       "description": "Which task-prompt wording was used (phase 7b); 'original' in the main matrix."
     },
     "model_id": { "type": "string", "minLength": 1 },
-    "region": { "type": "string", "pattern": "^[a-z]{2}-[a-z]+-[0-9]$" },
+    "backend": {
+      "enum": ["bedrock", "local"],
+      "description": "Which model backend served the run (D-060). Absent means bedrock, so every record written before D-060 stays valid unchanged."
+    },
+    "region": {
+      "type": "string",
+      "pattern": "^[a-z]{2}-[a-z]+-[0-9]$",
+      "description": "Bedrock runs only: required there, forbidden for a local run (D-060)."
+    },
+    "local_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime", "runtime_version", "weights_sha256", "quantization", "context_length", "seed",
+        "chat_template_sha256", "rendered_prefix_sha256", "refusal_modified"
+      ],
+      "description": "Local runs only (D-060): everything that can change what a locally served model does, pinned. model_id is the model's published name and weights_sha256 is its identity.",
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "runtime_version": { "type": "string", "minLength": 1 },
+        "weights_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "quantization": { "type": "string", "minLength": 1 },
+        "context_length": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer" },
+        "chat_template_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "rendered_prefix_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Hash of the fixed request prefix (system prompt, tool schemas, hint) as the runtime renders it."
+        },
+        "refusal_modified": {
+          "type": "boolean",
+          "description": "True for a refusal-removed fine-tune. Its refusal rate is never read as propensity (D-060)."
+        }
+      }
+    },
     "inference_config": {
       "type": "object",
       "additionalProperties": false,
@@ -91,6 +126,10 @@
       "minimum": 0,
       "description": "Half the worst docker-exec round trip among the clock samples (D-037); null exactly when clock_offset_ms is."
     },
+    "clock_offset_end_ms": {
+      "type": ["number", "null"],
+      "description": "The same measurement repeated at the end of the run, after the attacker was stopped (PLAN.md phase 4, dependency 5). Optional: records written before phase 4 have none. null when it could not be taken (the target had died). A difference from clock_offset_ms beyond the clock tolerance flags the run (telemetry.clock_drift_ms); it never changes termination_reason."
+    },
     "flag": { "type": "string", "minLength": 16 },
     "admin_password": { "type": "string", "minLength": 16 },
     "started_at": { "type": "string", "format": "date-time" },
@@ -108,6 +147,12 @@
     "harness_error": { "type": ["string", "null"] }
   },
   "allOf": [
+    {
+      "description": "Bedrock runs carry a region and no local_runtime; local runs carry local_runtime and no region (D-060). The `if` requires backend itself: without that, a record with no backend (every record written before D-060) would match the local branch.",
+      "if": { "required": ["backend"], "properties": { "backend": { "const": "local" } } },
+      "then": { "required": ["local_runtime"], "not": { "required": ["region"] } },
+      "else": { "required": ["region"], "not": { "required": ["local_runtime"] } }
+    },
     {
       "description": "Secrets are present exactly when the record is not redacted.",
       "if": { "properties": { "redacted": { "const": false } } },

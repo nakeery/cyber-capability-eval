@@ -52,6 +52,32 @@ def test_score_from_another_run_is_reported(manifest, steps, event, score):
     assert_reports(problems_for(manifest, steps, [event], score), "score: run_id")
 
 
+# --- 1b. the backend decides who has a Bedrock request id (D-060) -----------------
+
+def test_bedrock_step_without_a_request_id_is_reported(manifest, steps, event, score):
+    del steps[1]["bedrock_request_id"]
+    assert_reports(problems_for(manifest, steps, [event], score), "step 2: a Bedrock run's step has no")
+
+
+def test_a_manifest_with_no_backend_is_checked_as_bedrock(manifest, steps, event, score):
+    assert "backend" not in manifest  # the pre-D-060 shape
+    del steps[0]["bedrock_request_id"]
+    assert_reports(problems_for(manifest, steps, [event], score), "step 1: a Bedrock run's step has no")
+
+
+def test_local_run_needs_no_request_ids(manifest, steps, event, score):
+    manifest["backend"] = "local"
+    for each in steps:
+        del each["bedrock_request_id"]
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+def test_local_run_step_with_a_request_id_is_reported(manifest, steps, event, score):
+    manifest["backend"] = "local"
+    del steps[0]["bedrock_request_id"]  # step 2 still carries one
+    assert_reports(problems_for(manifest, steps, [event], score), "step 2: a local run's step carries")
+
+
 # --- 2. step numbering -----------------------------------------------------------
 
 def test_missing_step_number_is_reported(manifest, steps, event, score):
@@ -275,6 +301,56 @@ def test_termination_reason_must_match_the_step_log(manifest, steps, event, scor
 def test_score_must_match_the_step_log(manifest, steps, event, score):
     score["flag_submitted"] = True  # but no submit_flag step
     assert_reports(problems_for(manifest, steps, [event], score), "score: flag_submitted")
+
+
+def test_a_harness_error_after_a_submission_still_validates(manifest, steps, event, score):
+    # A failure after the submit (log collection, the end-of-run checks) overrides the reason. If the
+    # run then failed validation it would vanish from the per-cell harness_error count (D-065).
+    submit(steps[1])
+    manifest["termination_reason"] = "harness_error"
+    score["flag_submitted"] = True
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+@pytest.mark.parametrize("reason", ["api_error", "target_down", "agent_stopped", "step_cap", "context_limit"])
+def test_only_harness_error_may_coexist_with_a_submission(manifest, steps, event, score, reason):
+    submit(steps[1])
+    manifest["termination_reason"] = reason
+    score["flag_submitted"] = True
+    assert_reports(problems_for(manifest, steps, [event], score), "submit_flag step exists")
+
+
+def test_a_harness_error_without_a_submission_is_still_fine(manifest, steps, event, score):
+    manifest["termination_reason"] = "harness_error"
+    assert problems_for(manifest, steps, [event], score) == []
+
+
+# --- clock drift across the run (PLAN.md phase 4, dependency 5) ----------------
+
+def test_an_offset_that_moved_beyond_the_tolerance_is_reported(manifest):
+    from telemetry import clock_drift_ms
+    manifest.update(clock_offset_ms=0, clock_offset_end_ms=500, clock_uncertainty_ms=5)
+    assert clock_drift_ms(manifest) == 500
+
+
+@pytest.mark.parametrize("end", [0, 50, -100, 104])
+def test_an_offset_within_uncertainty_plus_margin_is_not_drift(manifest, end):
+    from telemetry import clock_drift_ms
+    manifest.update(clock_offset_ms=0, clock_offset_end_ms=end, clock_uncertainty_ms=5)   # tolerance 105 ms
+    assert clock_drift_ms(manifest) is None
+
+
+@pytest.mark.parametrize("fields", [{"clock_offset_end_ms": None}, {}, {"clock_offset_ms": None, "clock_uncertainty_ms": None,
+                                                                          "clock_offset_end_ms": 900}])
+def test_a_missing_measurement_is_not_reported_as_drift(manifest, fields):
+    from telemetry import clock_drift_ms
+    manifest.update(fields)
+    assert clock_drift_ms(manifest) is None
+
+
+def test_drift_never_changes_whether_a_run_validates(manifest, steps, event, score):
+    manifest.update(clock_offset_end_ms=900)
+    assert problems_for(manifest, steps, [event], score) == []
 
 
 # --- 2b. step_cap -------------------------------------------------------------

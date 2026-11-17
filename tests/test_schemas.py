@@ -102,6 +102,15 @@ def test_clock_fields_are_both_measured_or_both_null(manifest):
     assert_valid("manifest", manifest)
 
 
+def test_the_end_of_run_clock_offset_is_optional_and_may_be_null(manifest):
+    # Absent: every record written before phase 4 (the baseline has none). Null: the target had died.
+    for value in (12.5, -3, None):
+        manifest["clock_offset_end_ms"] = value
+        assert_valid("manifest", manifest)
+    manifest["clock_offset_end_ms"] = "12"
+    assert_invalid("manifest", manifest, "is not of type")
+
+
 def test_large_clock_offset_still_validates(manifest):
     # The 250 ms abort is a harness_error outcome, so that record must still be valid.
     manifest["clock_offset_ms"] = 900
@@ -111,6 +120,70 @@ def test_large_clock_offset_still_validates(manifest):
 def test_unknown_manifest_field_is_rejected(manifest):
     manifest["notes"] = "typo'd fields must not slip through"
     assert_invalid("manifest", manifest, "Additional properties")
+
+
+# --- backend: Bedrock or a local model (D-060) --------------------------------
+
+LOCAL_RUNTIME = {
+    "runtime": "example-server", "runtime_version": "1.2.3", "weights_sha256": "sha256:" + "c" * 64,
+    "quantization": "Q4_K_M", "context_length": 8192, "seed": 7,
+    "chat_template_sha256": "sha256:" + "d" * 64, "rendered_prefix_sha256": "sha256:" + "e" * 64,
+    "refusal_modified": False,
+}
+
+
+def as_local(manifest):
+    """Turn the Bedrock baseline into a valid local-backend record."""
+    del manifest["region"]
+    manifest.update(backend="local", model_id="example-model-7b", local_runtime=dict(LOCAL_RUNTIME))
+    return manifest
+
+
+def test_a_record_with_no_backend_is_a_bedrock_run_and_needs_a_region(manifest):
+    # Every record written before D-060 has no backend. If the `if` did not itself
+    # require "backend", those records would match the local branch and be rejected.
+    del manifest["region"]
+    assert_invalid("manifest", manifest, "'region' is a required property")
+
+
+def test_explicit_bedrock_backend_is_valid_with_a_region(manifest):
+    manifest["backend"] = "bedrock"
+    assert_valid("manifest", manifest)
+
+
+def test_bedrock_run_must_not_carry_local_runtime(manifest):
+    manifest["local_runtime"] = dict(LOCAL_RUNTIME)
+    assert_invalid("manifest", manifest, "should not be valid")
+
+
+def test_local_run_is_valid_without_a_region(manifest):
+    assert_valid("manifest", as_local(manifest))
+
+
+def test_local_run_needs_local_runtime(manifest):
+    del as_local(manifest)["local_runtime"]
+    assert_invalid("manifest", manifest, "'local_runtime' is a required property")
+
+
+def test_local_run_must_not_carry_a_region(manifest):
+    as_local(manifest)["region"] = "us-east-1"
+    assert_invalid("manifest", manifest, "should not be valid")
+
+
+@pytest.mark.parametrize("field", sorted(LOCAL_RUNTIME))
+def test_every_local_runtime_field_is_required(manifest, field):
+    del as_local(manifest)["local_runtime"][field]
+    assert_invalid("manifest", manifest, f"'{field}' is a required property")
+
+
+def test_local_runtime_rejects_an_unpinned_weights_hash(manifest):
+    as_local(manifest)["local_runtime"]["weights_sha256"] = "not-a-hash"
+    assert_invalid("manifest", manifest, "does not match")
+
+
+def test_backend_must_be_a_known_value(manifest):
+    manifest["backend"] = "openai"
+    assert_invalid("manifest", manifest, "is not one of")
 
 
 # --- step --------------------------------------------------------------------
@@ -135,6 +208,78 @@ def test_text_only_turn_is_valid(step):
     step.update(tool_name=None, tool_input=None, output_full=None,
                 output_sent_to_model=None, exit_code=None, stop_reason="end_turn")
     assert_valid("step", step)
+
+
+def test_bedrock_request_id_is_optional_in_the_schema(step):
+    # A local run has none (D-060); the per-run rule lives in check_consistency.
+    del step["bedrock_request_id"]
+    assert_valid("step", step)
+
+
+def test_raw_stop_reason_and_raw_completion_are_accepted(step):
+    step.update(raw_stop_reason="tool_calls", raw_completion="<call>ls</call>")
+    assert_valid("step", step)
+
+
+# --- malformed turns (D-063) ---------------------------------------------------
+
+def as_malformed(step, cause="invalid_arguments"):
+    """A turn that ran nothing: the model was shown only the fixed error text."""
+    step.update(
+        tool_name=None, tool_input=None, output_full=None, exit_code=None,
+        output_sent_to_model="Error: the tool call had the wrong arguments.",
+        tool_call_error=cause, raw_tool_use=[{"toolUseId": "t1", "name": "run_command", "input": {"cmd": "ls"}}],
+    )
+    return step
+
+
+@pytest.mark.parametrize("cause", ["unknown_tool", "invalid_arguments", "multiple_calls", "unusable_output"])
+def test_malformed_turn_is_valid(step, cause):
+    assert_valid("step", as_malformed(step, cause))
+
+
+def test_malformed_turn_needs_the_raw_call(step):
+    del as_malformed(step)["raw_tool_use"]
+    assert_invalid("step", step, "'raw_tool_use' is a required property")
+
+
+def test_malformed_turn_runs_no_tool(step):
+    as_malformed(step)["tool_name"] = "run_command"  # a malformed turn is never a tool call
+    assert_invalid("step", step, "is not of type 'null'")
+
+
+def test_malformed_turn_cannot_be_a_submission(step):
+    # The scorer and the validator key on tool_name == "submit_flag" (D-063). A malformed
+    # submit_flag must therefore be recorded with tool_name null, never as a submission.
+    as_malformed(step)["tool_name"] = "submit_flag"
+    assert_invalid("step", step, "is not of type 'null'")
+
+
+def test_malformed_turn_records_the_error_text_the_model_was_shown(step):
+    as_malformed(step)["output_sent_to_model"] = None
+    assert_invalid("step", step, "is not of type 'string'")
+
+
+def test_malformed_turn_has_no_stored_output(step):
+    as_malformed(step)["output_full"] = "something"
+    assert_invalid("step", step, "is not of type 'null'")
+
+
+def test_unknown_tool_call_error_is_rejected(step):
+    as_malformed(step)["tool_call_error"] = "the_model_was_silly"
+    assert_invalid("step", step, "is not one of")
+
+
+def test_raw_tool_use_without_an_error_is_rejected(step):
+    step["raw_tool_use"] = [{"toolUseId": "t1", "name": "run_command", "input": {"command": "ls"}}]
+    assert_invalid("step", step, "should not be valid")
+
+
+def test_text_only_turn_still_has_no_tool_output_next_to_a_malformed_rule(step):
+    # The malformed-turn rule must not loosen the text-only rule for turns with no error.
+    step.update(tool_name=None, tool_input=None, exit_code=None, stop_reason="end_turn",
+                output_full=None, output_sent_to_model="something the harness invented")
+    assert_invalid("step", step, "is not of type 'null'")
 
 
 def test_placeholders_are_fine_in_attack_fields(step):

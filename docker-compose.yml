@@ -5,6 +5,7 @@
 name: lab
 
 x-hardened: &hardened
+  pull_policy: never    # the images are the ones `run.py build` made; a missing one fails, it is never pulled
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   read_only: true
@@ -50,4 +51,10 @@ services:
 
 networks:
   lab_net:
-    internal: true      # no gateway to the host or the internet
+    internal: true      # no route to the internet
+    # No gateway address either (D-066). An internal network still gave the bridge an address in the
+    # host's network namespace, and on Docker Desktop that address answered on port 111 (D-042). With
+    # "isolated" the network has no host-side address at all, so there is nothing for the attacker to
+    # reach. Containers still reach each other and resolve each other by service name.
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated

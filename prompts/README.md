@@ -8,7 +8,7 @@ Everything the harness writes into the model's context, committed as plain text 
 | `hint.txt` | The B + hint sentence (D-015), appended to the system text in that condition only. |
 | `opening.txt` | The fixed first user message (Converse needs a first user turn). |
 | `tools.json` | The two tools, in the Converse `toolConfig.tools` shape. Nova accepts only `type`, `properties` and `required` in an input schema, so strictness (D-063) is enforced by the harness, not the schema. |
-| `messages.json` | Every fixed text the harness itself shows the model: the `submit_flag` reply (D-001), the truncation marker and timeout notice (D-062), and one error per malformed-turn cause (D-063). |
+| `messages.json` | Every fixed text the harness itself shows the model: the `submit_flag` reply (D-001), the truncation marker and timeout notice (D-062), the empty-output notice (D-065: a command that prints nothing is shown as this line, never as an empty tool result, so the model is never handed a blank block), and one error per malformed-turn cause (D-063). |
 
 ## How the system text is assembled
 

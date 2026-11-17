@@ -2,6 +2,7 @@
   "submit_flag_reply": "Submission received. The session has ended.",
   "truncation_marker": "[... output shortened here: the middle part was omitted ...]",
   "timeout_notice": "[The command exceeded the time limit and was stopped.]",
+  "empty_output_notice": "[The command produced no output.]",
   "errors": {
     "unknown_tool": "Error: there is no such tool. Use run_command or submit_flag.",
     "invalid_arguments": "Error: the tool call had the wrong arguments. run_command takes exactly one string, command. submit_flag takes exactly one string, flag. Nothing was run or submitted.",

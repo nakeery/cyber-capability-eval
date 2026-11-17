@@ -20,7 +20,7 @@ A small, rigorous evaluation of whether an LLM agent (Amazon Nova Micro on Bedro
 | `DECISIONS.md` | Append-only decision log |
 | `target/`, `attacker/` | The vulnerable Flask app and its image; the container the agent's commands run in |
 | `scoring/` | The deterministic scorer: `python scoring/scorer.py <run_dir>` |
-| `harness/` | Agent loop, Bedrock client, run orchestration, telemetry validator (the agent loop is phase 4) |
+| `harness/` | Agent loop, Bedrock client, run orchestration, preflight, telemetry validator (phase 4) |
 | `schemas/` | JSON schemas for the four telemetry records and the outcome labels |
 | `tests/` | pytest suites (`.venv/Scripts/python -m pytest`) |
 | `infra/bootstrap/` | One-time AWS setup: scoped IAM user and budget alarm |
@@ -47,6 +47,42 @@ Requirements: Python 3.13, the AWS CLI, Docker Engine 26 or later (from phase 2)
    ```bash
    .venv/Scripts/python harness/smoke_test.py
    ```
+
+## Testing the local model (D-067 to D-069)
+
+The evaluated model runs on the HOST, in `llama-server`, never in a container: only the command text it writes reaches the attacker container. These commands exercise it on synthetic prompts, with no lab involved. They assume the setup of D-067 (the runtime, the weights and the API key under `G:\model-eval-local\`).
+
+1. Start the server. It is started from `harness/local_pin.json`'s flags, refuses to start if something holds the port, and is stopped again if it listens beyond loopback:
+
+   ```bash
+   powershell -NoProfile -File harness/local_server.ps1 start
+   ```
+
+2. Check the committed pin against the running server (it only renders the study prompt, it never asks the model to answer it). Every line should say PASS:
+
+   ```bash
+   .venv/Scripts/python harness/local_check.py
+   ```
+
+3. Run the spike: 30 benign shell tasks at the production sampling through the loop's own strict classifier, the turn after an unhelpful tool result, and the context window (about 5 minutes; `--n 6 --follow-ups 3 --window 2000,8000` is the 1-minute version):
+
+   ```bash
+   .venv/Scripts/python harness/local_spike.py
+   ```
+
+4. Optionally, run the rehearsal (D-071): the real loop and the real parser on real model output, with a fake lab, made-up prompts and a simulated shell that starts no process. It never touches the study prompt or Docker, and takes about 40 seconds:
+
+   ```bash
+   .venv/Scripts/python -m pytest tests/test_local_rehearsal.py -v -s
+   ```
+
+5. Stop the server (it kills only a process whose executable is the pinned runtime):
+
+   ```bash
+   powershell -NoProfile -File harness/local_server.ps1 stop
+   ```
+
+`powershell -NoProfile -File harness/local_server.ps1 status` shows whether it is running and what it listens on. Results go to `runs/local_spike/` (gitignored). To test a different model, give it its own pin file (`LOCAL_LLM_PIN` in `.env`) and see D-068 for what else changes.
 
 ## Safety
 
