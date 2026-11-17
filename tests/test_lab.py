@@ -78,9 +78,12 @@ class FakeRunner:
         return subprocess.CompletedProcess(argv, code, out, err)
 
 
-def make_box(respond=None, responses=(), variant="B"):
+def make_box(respond=None, responses=(), variant="B", work_dir=None):
+    """A Lab on a fake runner. Anything that calls `collect_events` must pass `work_dir=tmp_path`: the log is written to a
+    scratch file there, and with no work_dir the Lab falls back to the repository's own `runs/`, which is gitignored (absent
+    in a fresh checkout, so CI failed) and which a test must not write into on a developer's machine either."""
     runner = FakeRunner(respond, responses)
-    return Lab(variant, RUN_ID, runner=runner), runner
+    return Lab(variant, RUN_ID, runner=runner, work_dir=work_dir), runner
 
 
 def always(code=0, stdout=b"", stderr=b""):
@@ -202,8 +205,8 @@ def test_down_removes_the_stack_and_its_volumes():
                                   "down", "-v", "-t", "3"]
 
 
-def test_every_docker_call_is_an_argv_list_and_compose_names_the_project():
-    box, runner = make_box()
+def test_every_docker_call_is_an_argv_list_and_compose_names_the_project(tmp_path):
+    box, runner = make_box(work_dir=tmp_path)
     box.up()
     box.seed({})
     box.health()
@@ -385,9 +388,9 @@ def test_down_reports_leftovers_that_survive_the_forced_removal():
 
 # --- log collection -------------------------------------------------------------------------
 
-def test_collect_events_adds_the_run_id_and_counts_the_log():
+def test_collect_events_adds_the_run_id_and_counts_the_log(tmp_path):
     stdout = b'{"seq":1,"path":"/"}\n{"seq":2,"path":"/x"}\n'
-    box, runner = make_box(always(stdout=stdout))
+    box, runner = make_box(always(stdout=stdout), work_dir=tmp_path)
     events, notes = box.collect_events()
     assert events == [{"seq": 1, "path": "/", "run_id": RUN_ID}, {"seq": 2, "path": "/x", "run_id": RUN_ID}]
     assert notes == {"events": 2, "log_bytes": len(stdout), "target_stderr_bytes": 0}
@@ -400,21 +403,21 @@ def test_collect_events_adds_the_run_id_and_counts_the_log():
     (b"not json\n", "could not be read"),
     (b"\xff\xfe\n", "could not be read"),
 ])
-def test_collect_events_refuses_an_incomplete_or_unreadable_log(stdout, fragment):
-    box, _ = make_box(always(stdout=stdout))
+def test_collect_events_refuses_an_incomplete_or_unreadable_log(stdout, fragment, tmp_path):
+    box, _ = make_box(always(stdout=stdout), work_dir=tmp_path)
     with pytest.raises(HarnessError, match=fragment):
         box.collect_events()
 
 
-def test_collect_events_of_an_empty_log_is_no_events():
-    box, _ = make_box(always(stdout=b""))
+def test_collect_events_of_an_empty_log_is_no_events(tmp_path):
+    box, _ = make_box(always(stdout=b""), work_dir=tmp_path)
     events, notes = box.collect_events()
     assert events == []
     assert notes == {"events": 0, "log_bytes": 0, "target_stderr_bytes": 0}
 
 
-def test_collect_events_counts_stderr_but_never_mixes_it_into_events():
-    box, _ = make_box(always(stdout=b'{"seq":1}\n', stderr=b"warn: something\n"))
+def test_collect_events_counts_stderr_but_never_mixes_it_into_events(tmp_path):
+    box, _ = make_box(always(stdout=b'{"seq":1}\n', stderr=b"warn: something\n"), work_dir=tmp_path)
     events, notes = box.collect_events()
     assert events == [{"seq": 1, "run_id": RUN_ID}]
     assert notes["target_stderr_bytes"] == len(b"warn: something\n")
