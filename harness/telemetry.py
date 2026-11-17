@@ -140,6 +140,18 @@ def corrected_ts(event: dict, manifest: dict) -> datetime:
     return _ts(event["timestamp"]) - timedelta(milliseconds=manifest.get("clock_offset_ms") or 0)
 
 
+def clock_drift_ms(manifest: dict) -> float | None:
+    """How far the container-minus-host offset moved during the run, in milliseconds, when it
+    moved by more than the clock tolerance; otherwise None. The offset is measured at preflight
+    and again at the end (PLAN.md phase 4, dependency 5). A moved offset means event times were
+    corrected with a stale number, so the run is reported, never silently scored as clean."""
+    start, end = manifest.get("clock_offset_ms"), manifest.get("clock_offset_end_ms")
+    if start is None or end is None:
+        return None
+    drift = abs(end - start)
+    return drift if timedelta(milliseconds=drift) > clock_tolerance(manifest) else None
+
+
 def is_post_run(event: dict, manifest: dict) -> bool:
     """Stamped after the run ended (D-037): counted and reported, never scored or fatal."""
     return corrected_ts(event, manifest) > _ts(manifest["ended_at"]) + clock_tolerance(manifest)
@@ -232,6 +244,17 @@ def check_consistency(manifest: dict, steps: list[dict], events: list[dict],
     if score is not None and score["run_id"] != run_id:
         problems.append("score: run_id differs from the manifest")
 
+    # 1b. The backend decides whether a step has a Bedrock request id (D-060). The step
+    #     schema cannot see the manifest, so the rule lives here: every step of a Bedrock
+    #     run has one (each step is one model call), and no step of a local run does.
+    backend = manifest.get("backend", "bedrock")
+    for step in steps:
+        has_request_id = bool(step.get("bedrock_request_id"))
+        if backend == "bedrock" and not has_request_id:
+            problems.append(f"step {step['step']}: a Bedrock run's step has no bedrock_request_id")
+        if backend == "local" and has_request_id:
+            problems.append(f"step {step['step']}: a local run's step carries a bedrock_request_id")
+
     # 2. Steps are numbered 1..N exactly once each, in file order.
     numbers = [step["step"] for step in steps]
     if numbers != list(range(1, len(steps) + 1)):
@@ -308,9 +331,13 @@ def check_consistency(manifest: dict, steps: list[dict], events: list[dict],
         problems.append(f"submit_flag called {len(submits)} times (steps {submits}); it is one-shot")
     if submits and submits[-1] != len(steps):
         problems.append(f"step {submits[-1]}: submit_flag must be the last step")
-    if (manifest["termination_reason"] == "submitted") != bool(submits):
+    # A submit step may coexist with `harness_error` only: a failure AFTER the submission (log
+    # collection, the end-of-run checks) overrides the reason, and refusing to validate that run
+    # would hide it from the per-cell harness_error count (D-065).
+    reason = manifest["termination_reason"]
+    if (reason == "submitted") != bool(submits) and not (submits and reason == "harness_error"):
         problems.append(
-            f"termination_reason is {manifest['termination_reason']!r} but "
+            f"termination_reason is {reason!r} but "
             f"{'a' if submits else 'no'} submit_flag step exists"
         )
     if score is not None and score["flag_submitted"] != bool(submits):
@@ -399,6 +426,9 @@ def main(argv: list[str]) -> int:
             late = post_run_event_numbers(manifest, events)
             if late:
                 print(f"     note: {len(late)} post-run event(s): {late}")
+            drift = clock_drift_ms(manifest)
+            if drift is not None:
+                print(f"     note: the container clock offset moved {drift:.0f} ms during the run (beyond the tolerance)")
         failed += bool(problems)
     return 1 if failed else 0
 
