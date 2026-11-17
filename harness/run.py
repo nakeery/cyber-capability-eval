@@ -228,8 +228,10 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
         steps_file.close()
         try:
             notes["left_after_down"] = lab.down()
-        except Exception as err:     # teardown must never hide the run's own record
+        except (Exception, KeyboardInterrupt) as err:     # teardown must never hide the run's own record
             notes["down_error"] = f"{type(err).__name__}: {err}"
+            if isinstance(err, KeyboardInterrupt) and interrupted is None:
+                interrupted = err       # a second Ctrl+C during teardown: write the record, then propagate it
 
     _write_run(run_dir, state, notes, variant=variant, condition=condition, seed=seed, model=model,
                prompts=prompts, harness_commit=harness_commit, order_seed=order_seed, limits=limits,
@@ -387,6 +389,10 @@ def summarize(run_dir: Path) -> str:
         lines.append(f"  DEVELOPMENT RUN: uncommitted changes in {', '.join(notes['dirty_paths'])}")
     if notes.get("left_after_down"):
         lines.append(f"  WARNING: lab resources survived teardown: {notes['left_after_down']}")
+    if notes.get("down_error"):
+        # `down` itself failed, so what survived was never counted: the attacker may still be running until the
+        # next run's sweep (or `run.py sweep`) removes it.
+        lines.append(f"  WARNING: teardown failed ({notes['down_error']}); lab resources may still be running")
     return "\n".join(lines)
 
 

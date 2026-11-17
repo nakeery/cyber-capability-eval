@@ -41,12 +41,17 @@ pytestmark = pytest.mark.skipif(not _docker_ready(), reason="needs Docker and th
 
 
 @pytest.fixture
-def stack():
-    """`stack(variant)` -> (lab, seed) with the stack up, preflighted, seeded and ready. Always removed."""
+def stack(tmp_path):
+    """`stack(variant)` -> (lab, seed) with the stack up, preflighted, seeded and ready. Always removed.
+
+    Each lab's work_dir is the test's own tmp_path, as run.py gives it the run's directory: without one,
+    `collect_events` writes its scratch file into the repository's gitignored runs/, which does not exist in a
+    fresh checkout (the same defect tests/test_lab.py had before it was fixed)."""
     made: list[Lab] = []
 
     def start(variant: str, *, seeded: bool = True):
         lab = Lab(variant, uuid.uuid4().hex)
+        lab.work_dir = tmp_path
         made.append(lab)
         lab.up()
         seed = new_seed(variant)

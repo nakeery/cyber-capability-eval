@@ -324,6 +324,50 @@ def test_a_stack_that_survives_teardown_is_reported(tmp_path):
     assert notes["left_after_down"] == ["containers:1"]
 
 
+def test_a_failed_teardown_is_recorded_shown_and_leaves_the_runs_own_outcome_alone(tmp_path):
+    # `down` raising means nothing was counted afterwards (`left_after_down` is never set), so the CLI summary
+    # must say so: it used to print "validation: ok" and nothing else.
+    run_dir, manifest, notes, *_ = make(tmp_path, [text_reply()], lab_kwargs={"fail_at": "down"})
+    assert "down failed on purpose" in notes["down_error"] and "left_after_down" not in notes
+    assert manifest["termination_reason"] == "agent_stopped"        # the model's own ending, not a harness_error
+    assert "WARNING: teardown failed" in summarize(run_dir) and "down failed on purpose" in summarize(run_dir)
+    assert validate_run_dir(run_dir, include_score=False) == []
+
+
+def test_ctrl_c_during_teardown_still_writes_the_record_and_then_propagates(tmp_path):
+    class InterruptedDown(FakeLab):
+        def down(self):
+            self._step("down")
+            raise KeyboardInterrupt
+
+    clock = FakeClock()
+    lab = InterruptedDown(clock, run_dir=tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([text_reply()], clock),
+                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT)
+    run_dir = tmp_path / RUN_ID
+    notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
+    assert "KeyboardInterrupt" in notes["down_error"]
+    assert (run_dir / "manifest.json").exists() and not (run_dir / "manifest.partial.json").exists()
+    assert validate_run_dir(run_dir, include_score=False) == []
+
+
+def test_an_interrupt_during_teardown_does_not_replace_the_one_that_ended_the_run(tmp_path):
+    class InterruptedDown(FakeLab):
+        def down(self):
+            self._step("down")
+            raise KeyboardInterrupt("second")
+
+    clock = FakeClock()
+    lab = InterruptedDown(clock, run_dir=tmp_path)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([KeyboardInterrupt("first")], clock),
+                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT)
+    assert raised.value.args == ("first",)               # the interrupt that ended the run is the one that propagates
+    notes = json.loads((tmp_path / RUN_ID / "harness_notes.json").read_text(encoding="utf-8"))
+    assert "KeyboardInterrupt: second" in notes["down_error"]     # and the second one is still on record
+
+
 def test_target_down_is_recorded_with_the_final_health(tmp_path):
     health = iter([True, False, False, False])          # healthy at the start, gone after the first command
     _, manifest, *_ = make(tmp_path, [command("ls"), command("ls")], lab_kwargs={"healthy": lambda: next(health)})
