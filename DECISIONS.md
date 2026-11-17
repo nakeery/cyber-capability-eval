@@ -981,3 +981,25 @@ The entries below came out of fresh `architecture-advisor` and `methodology-revi
 **Why:** the tests are sensitive to the rules as written, but that says nothing about whether the rules are the right ones. `tests/mutation_check.py` breaks 25 rules of the scorer one at a time and reports any the suite still passes; all 25 are killed. Building it exposed five test gaps, each fixed: four tests where an earlier rule failing first masked the rule under test or a branch was never exercised, and one equivalent mutant (the blind branch's `sql_error` clause, redundant under a valid event because the schema forces `rows_returned` to null on an error), pinned by a unit case so the scorer does not rely on the schema. The review's value was in what the score does not record and what the analysis built on it may claim.
 
 **Constrains:** `scoring/scorer.py`; `tests/test_scorer.py`; PLAN.md phases 4, 5, 6, 7 and 8; `.claude/agents/methodology-reviewer.md`; the phase 5/6 floor-check key.
+
+---
+
+## D-059: Terraform on AWS is tabled; the lab stays local and containerized
+**Date:** 2026-11-17 · **Status:** accepted · **Supersedes:** PLAN.md's phase 9 as an optional last phase · **Amends (forward references only):** D-007, D-012
+
+**Decision:**
+- **The lab runs only as local Docker Compose** (the internal-only networks and hardening of D-034 and D-042). PLAN.md's phase 9 (Terraform on AWS) is **tabled**: not scheduled, not built, and nothing else in the plan waits on it. It may return as a future expansion. Its design stays in PLAN.md as a starting point, marked as not re-reviewed; the AWS specifics in it must be re-verified against current documentation before anyone builds from it.
+- **What does not change:** Bedrock is still called from the local machine through the scoped `model-eval` profile (D-021, D-022); `infra/bootstrap/` (the scoped IAM user and the budget alarm) stays, and the alarm still guards spend; the preflight egress, DNS and IMDS checks still run locally (169.254.169.254 must be unreachable from the attacker container); the Terraform block in `.gitignore` stays. It is inert, and it keeps state and tfvars out of git if the work resumes.
+- **What is dropped with it:** the endpoint, SSM and S3 design; the cloud re-run of a small subset to show the results match the local runs; and **the IMDS extension to Variant D**, which D-007 left "for the optional phase 9 extension". D stays the planted flag file only.
+- **Review checkpoints:** phase 9's `architecture-advisor` and `containment-auditor` checkpoints apply only if it is revived.
+
+**Why:** the author prefers the local containerized format for now and regards Terraform as a possible future expansion, not part of this study. Supporting reasons: the containment work (D-034, D-042) and the preflight checks were built and audited for the local topology, and PLAN.md's risk table already named infrastructure work as the thing most likely to crowd out the evaluation.
+
+**Costs accepted (stated here so the report can state them):**
+- **One environment.** Every result comes from one Docker Desktop host on Windows; nothing replicates it on a second host. The report lists this under threats to validity (PLAN.md phase 8).
+- **Containment is local-host containment.** D-042's finding that the attacker reaches the bridge gateway, where Docker Desktop's rpcbind answers on port 111, is handled by the harness's preflight connect-scan, not by the network isolation a private-subnet VPC would give.
+- **Variant D speaks only to a file-based shortcut.** No claim can be made about an agent reaching credential-bearing metadata services.
+
+**Rejected:** deleting phase 9 (it holds researched design the user wants to keep open as an expansion); building it in parallel with phases 4 to 8 (it competes for the same time, and its sign-off is a full containment review); removing the `.gitignore` Terraform block (inert, and it protects state if the work resumes).
+
+**Constrains:** PLAN.md (the layout tree, the phase 8 threats, the phase 9 heading, the review checkpoints, the risk table, the decision count); CLAUDE.md "How to work here"; `.claude/agents/architecture-advisor.md` and `.claude/agents/containment-auditor.md`.

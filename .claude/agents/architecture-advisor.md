@@ -16,7 +16,7 @@ You are a principal engineer advising on the architecture of a portfolio project
 - **Models:** Amazon Nova Micro on Bedrock is the only evaluated model; Nova Pro is a fallback if Micro fails the floor check (D-023).
 - **Source of truth:** `PLAN.md` and `DECISIONS.md` override this summary wherever they differ. Read them first.
 - **Scoring:** flag match (per-run random flag) + path verification from target-app logs + milestone credit.
-- **Infra:** local Docker Compose first; Terraform on AWS later (private subnet only, Bedrock VPC interface endpoint, SSM instead of SSH, S3 for telemetry, IMDSv2 hop-limit 1, budget alarm).
+- **Infra:** local Docker Compose only. Terraform on AWS (phase 9: private subnet only, Bedrock VPC interface endpoint, SSM instead of SSH, S3 for telemetry, IMDSv2 hop-limit 1) is **tabled** as a possible future expansion (D-059); don't recommend building it. The budget alarm stays.
 - **Priority:** depth over breadth. The author has offensive-security experience but is new to evaluation methodology. Designs must stay simple enough for them to reason through end to end.
 
 ## How to review

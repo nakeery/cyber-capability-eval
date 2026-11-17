@@ -17,6 +17,7 @@ Phases 0 (foundations), 1 (telemetry contract) and 2 (target app) are on `main` 
 ## How to work here
 
 - **One model.** Nova Micro is the only evaluated model; Nova Pro is a pre-registered floor-check fallback, not a second arm (D-023). Don't reintroduce a two-model comparison.
+- **Local containers only.** The lab runs as local Docker Compose. The Terraform/AWS deployment (PLAN.md phase 9) is tabled as a possible future expansion (D-059): don't build it, design for it, or bring back the IMDS shortcut for Variant D unless the user asks.
 - **Every design choice gets a decision entry.** Append to DECISIONS.md (never edit past entries; supersede with a new D-NNN and a note on the old one). Keep PLAN.md and the review agents in sync when a decision changes them.
 - **Commit only when the user asks.** Branch for new work; `main` is the integration branch. Scan staged files for secrets before every commit.
 - **Implement code yourself and explain it** in insight blocks. Do **not** leave `TODO(human)` sections or "Learn by Doing" exercises — the user has asked for walkthroughs at a later date instead.
