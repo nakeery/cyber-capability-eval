@@ -34,8 +34,8 @@ sys.path.insert(0, str(ROOT / "harness"))
 
 from db import ADMIN_USERNAME, DECOY_USERNAMES, ITEMS  # noqa: E402  (stdlib only; never imports Flask)
 from execution import _popen_kwargs  # noqa: E402
-from preflight import (CLOCK_SAMPLES, GATEWAY_MODE_OPTION, check_clock, check_compose_config,  # noqa: E402
-                       check_live_container, clock_offset, evaluate_probe)
+from preflight import (CLOCK_SAMPLES, GATEWAY_MODE_OPTION, check_agent_isolated_from_main, check_clock,  # noqa: E402
+                       check_compose_config, check_live_container, clock_offset, evaluate_probe)
 from target_logs import collect_events  # noqa: E402
 
 RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")     # a uuid4's hex form, the same as schemas/label.schema.json
@@ -235,8 +235,10 @@ class Lab:
             problems.append("the lab network was not created in isolated-gateway mode (D-066)")
         if not internal:
             problems.append("the lab network Docker created is not internal")
+        inspected: dict = {}
         for service, container in (("attacker", self.attacker), ("target", self.target)):
-            problems += check_live_container(self._inspect(container), service, self.variant, self.project)
+            inspected[service] = self._inspect(container)
+            problems += check_live_container(inspected[service], service, self.variant, self.project)
         probe = (ROOT / "harness" / "network_probe.py").read_bytes()
         done = self._exec(self.attacker, "python3", "-", gateway or "", user="agent", input=probe,
                           check=False, timeout=180)
@@ -247,6 +249,7 @@ class Lab:
             problems.append(f"network probe: no JSON report (exit {done.returncode}): {_text(done.stderr)[:200]}")
         if report is not None:
             problems += evaluate_probe(report, gateway, isolated)
+            problems += check_agent_isolated_from_main(inspected["attacker"], report)
         if problems:
             raise HarnessError("preflight failed: " + "; ".join(problems))
         return {"gateway": gateway, "isolated": isolated, "internal": internal, "probe": report}

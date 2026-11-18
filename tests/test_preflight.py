@@ -9,6 +9,7 @@ from preflight import (
     CLOCK_ABORT_MS,
     CLOCK_SAMPLES,
     GATEWAY_MODE_OPTION,
+    check_agent_isolated_from_main,
     check_clock,
     check_compose_config,
     check_live_container,
@@ -43,7 +44,7 @@ def good_config(variant):
             "name": "lab-x_lab_net", "internal": True, "driver_opts": {GATEWAY_MODE_OPTION: "isolated"},
         }},
         "services": {
-            "attacker": hardened_service("10002:10002"),
+            "attacker": hardened_service("10003:10003"),     # not the agent's uid (10002): D-075
             "target": hardened_service("10001:10001"),
         },
     }
@@ -349,7 +350,7 @@ def good_inspect(service="attacker", variant="B", project=PROJECT):
             "Binds": None, "PortBindings": {}, "Devices": None, "Dns": None, "ExtraHosts": [],
             "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
         },
-        "Config": {"User": "10002:10002" if service == "attacker" else "10001:10001",
+        "Config": {"User": "10003:10003" if service == "attacker" else "10001:10001",     # the agent is 10002 (D-075)
                    "Env": ["PATH=/usr/local/bin", "LANG=C.UTF-8", "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305"]},
         "Mounts": mounts if variant == "D" else [],
     }
@@ -446,3 +447,43 @@ def test_a_host_bind_is_reported_for_a_variant_with_no_volume(variant):
     info = with_binds(good_inspect("attacker", variant), "attacker", variant)
     info["HostConfig"]["Binds"] = ["/var/run/docker.sock:/var/run/docker.sock"]
     assert_reported(check_live_container(info, "attacker", variant, PROJECT), "binds are")
+
+
+# --- the agent must not share a user with the container's own main process (D-075) -----------------
+# GOOD_REPORT's uid is the agent's: 10002. The container's own user must be some other number.
+
+def test_a_main_process_under_another_user_than_the_agent_passes():
+    assert check_agent_isolated_from_main(good_inspect("attacker"), GOOD_REPORT) == []
+
+
+def test_a_user_id_with_no_group_is_compared_too():
+    info = good_inspect("attacker")
+    info["Config"]["User"] = "10003"
+    assert check_agent_isolated_from_main(info, GOOD_REPORT) == []
+
+
+@pytest.mark.parametrize("user", ["10002:10002", "10002", "10002:10009"])
+def test_the_agents_own_user_as_the_containers_user_is_reported(user):
+    # "10002:10002" is how the attacker was configured before D-075: the agent could then stop its own container.
+    # Only the user id matters, not the group.
+    info = good_inspect("attacker")
+    info["Config"]["User"] = user
+    assert_reported(check_agent_isolated_from_main(info, GOOD_REPORT), "both run as user 10002")
+
+
+@pytest.mark.parametrize("user", ["agent", "agent:agent", "", None, ":10003", "²", "٣", " 10003", "10003 "])
+def test_a_container_user_that_is_not_numeric_cannot_be_compared_and_fails(user):
+    info = good_inspect("attacker")
+    info["Config"]["User"] = user
+    assert_reported(check_agent_isolated_from_main(info, GOOD_REPORT), "not a numeric user id")
+
+
+@pytest.mark.parametrize("uid", [None, "10002", 10002.0, True])
+def test_an_agent_user_id_that_is_not_an_integer_cannot_be_compared_and_fails(uid):
+    assert_reported(check_agent_isolated_from_main(good_inspect("attacker"), {**GOOD_REPORT, "uid": uid}),
+                    "cannot be compared")
+
+
+@pytest.mark.parametrize("info,report", [(None, GOOD_REPORT), (good_inspect("attacker"), None), ("x", []), ([], "x")])
+def test_an_unusable_record_or_report_fails_closed(info, report):
+    assert_reported(check_agent_isolated_from_main(info, report), "no usable")

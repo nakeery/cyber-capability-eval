@@ -9,6 +9,7 @@ every failure at once.
 
 from __future__ import annotations
 
+import re
 from statistics import median
 
 # D-037: an offset above this ends the run as harness_error, because event times are corrected by it.
@@ -153,6 +154,32 @@ def evaluate_probe(report: object, expected_gateway: str | None, isolated: bool 
     elif open_ports:
         problems.append(f"network probe: the bridge gateway {gateway} accepts connections on port(s) {open_ports}")
     return problems
+
+
+def check_agent_isolated_from_main(info: object, report: object) -> list[str]:
+    """The agent's shell must not share a user with the container's own main process (D-074 R1(a), D-075).
+
+    The container's main process is `sleep infinity` under init, and the agent's commands run in the same
+    container through `docker exec`. A process can signal another of the same user, so with one user the
+    agent could stop the main process and the container with it (verified in a throwaway container, D-072
+    R1), and the run would end as a failure the agent caused but the harness cannot tell from Docker losing
+    the container. Under a different user, with every capability dropped, that signal fails with EPERM.
+
+    This compares the container's configured user (the live `docker inspect`, not the compose file) with
+    the user id the probe measured inside the agent's own process. A name, a missing value or a malformed
+    record is a failure, never a pass, because the rule exists to be unable to pass by accident."""
+    if not isinstance(info, dict) or not isinstance(report, dict):
+        return ["main-process user: no usable `docker inspect` record or probe report to compare"]
+    user = str((info.get("Config") or {}).get("User") or "")
+    main_uid, agent_uid = user.split(":")[0], report.get("uid")
+    if not re.fullmatch(r"[0-9]+", main_uid):       # not str.isdigit(): it accepts "²", which int() then rejects with a traceback
+        return [f"main-process user: the container's user {user!r} is not a numeric user id, so it cannot be compared with the agent's"]
+    if isinstance(agent_uid, bool) or not isinstance(agent_uid, int):     # a bool is an int to Python, and a uid to nobody
+        return [f"main-process user: the agent's user id is {agent_uid!r}, so it cannot be compared with the container's"]
+    if int(main_uid) == agent_uid:
+        return [f"main-process user: the container's main process and the agent both run as user {agent_uid}, "
+                "so the agent could signal it and stop its own container (D-075)"]
+    return []
 
 
 def clock_offset(samples: list[tuple[int, int, int]]) -> tuple[float, float]:

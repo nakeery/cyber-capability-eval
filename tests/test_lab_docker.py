@@ -85,6 +85,23 @@ def test_the_real_preflight_passes_for_every_variant(stack, variant):
     assert report["probe"]["dns"] is False and report["probe"]["uid"] == 10002
 
 
+def test_the_agent_cannot_stop_the_container_it_runs_in(stack):
+    """D-072 R1, D-074, D-075: the check a fake cannot make.
+
+    The container's own user is not the agent's, so signalling its main process fails with EPERM. Before D-075 the
+    main process (`sleep infinity`, under init) and the agent's shell were both uid 10002, and a `kill` of that
+    sleep stopped the container (exit 143), which the harness then filed as a failure it could not attribute."""
+    lab, _ = stack("B", seeded=False)
+    out = executor(lab).run(
+        'for p in /proc/[0-9]*; do pid=${p#/proc/}; case "$(cat $p/comm 2>/dev/null)" in sleep) '
+        'kill -9 $pid 2>&1; echo "kill sleep: exit $?";; esac; done; kill -TERM 1 2>&1; echo "kill init: exit $?"; echo done'
+    ).output_sent
+    assert "kill sleep: exit" in out and "kill init: exit" in out, out          # the sleep was found: not a vacuous pass
+    assert "exit 0" not in out and out.count("Operation not permitted") >= 2, out
+    assert lab.attacker_running() is True
+    assert executor(lab).run("echo still here").output_sent == "still here\n"    # and it still runs the agent's commands
+
+
 def test_the_probe_reports_a_breach_when_the_network_is_not_internal():
     # Deliberately broken: the same attacker image on Docker's ordinary bridge network. The probe must
     # SEE the outside world there, and the rules must fail it. Skipped if this machine is offline.

@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from special_tokens import neutralize
+
 # D-062. Bytes, not characters: the budgets are about what a log or a context window holds.
 COMMAND_TIMEOUT_S = 30
 STORE_CAP = 1024 * 1024       # at most this much of a command's output is stored (output_full)
@@ -44,8 +46,14 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")   # everything but "\t" 
 
 
 def sanitize(text: str) -> str:
-    """Strip ANSI escapes and control characters (all but tab and newline). What the model is shown."""
-    return _CONTROL.sub("", _ANSI.sub("", text))
+    """What the model is shown of a command's output: ANSI escapes and control characters (all but tab and newline)
+    stripped, then special-token text neutralized (D-077: the local server would otherwise read `<|im_end|>` in a tool
+    result as a real turn boundary, D-073).
+
+    The order is part of the rule. Neutralizing is LAST, so that stripping cannot build a marker afterwards: with
+    `<|im_` + NUL + `end|>`, stripping the NUL is what makes the marker. `output_full` keeps the raw text; this is
+    what lands in `output_sent_to_model`, so the record still holds exactly what the model saw (PLAN.md dependency 2)."""
+    return neutralize(_CONTROL.sub("", _ANSI.sub("", text)))
 
 
 def _head(text: str, limit: int) -> str:

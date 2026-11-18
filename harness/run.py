@@ -44,6 +44,7 @@ from model import ModelClient  # noqa: E402
 from local_model import ServerCheckError, verify_weights  # noqa: E402
 from prompt_set import Prompts, find_leaks, load_prompts  # noqa: E402
 from seed import validate_seed  # noqa: E402
+from special_tokens import check_list_matches_pin, report_lines  # noqa: E402
 from variant_registry import VARIANTS  # noqa: E402
 
 RUNS_DIR = ROOT / "runs"
@@ -199,8 +200,9 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
             state.health_start = "healthy"
 
             def health() -> bool:
-                # After every command: first the attacker (a dead or wedged one would otherwise show up as
-                # ordinary steps full of Docker's own error text, which the model must never be shown), then
+                # After every command: first the attacker (a DEAD one would otherwise show up as ordinary steps
+                # full of Docker's own error text, which the model must never be shown; a wedged one, still
+                # running with no free process slot, is NOT seen by this check: D-075), then
                 # the target, retried because a single refused connection from a busy single-threaded server
                 # is not an outage (D-065).
                 if not lab.attacker_running():
@@ -352,6 +354,10 @@ def build_local_model(seed: int | None):
         pin = LocalPin.from_file(pin_file) if pin_file else LocalPin.from_file()   # a different model is a different pin file
     except (OSError, ValueError, TypeError, ServerCheckError) as err:
         raise HarnessError(f"the local model is not ready: {err}") from None
+    try:
+        check_list_matches_pin(pin.weights_sha256, pin.runtime_version)      # the neutralizer's list is this model's and build's (D-077)
+    except ValueError as err:
+        raise HarnessError(str(err)) from None
     seed = secrets.randbits(31) if seed is None else seed
     client = LocalClient(url, key_file.read_text().strip(), pin, seed)
     # The window must hold the prompt AND the reply: the loop ends a run when the next prompt could leave less
@@ -369,7 +375,14 @@ def summarize(run_dir: Path) -> str:
     """One screen of facts about a finished run. No agent text, no tool output, no secrets."""
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
-    steps = sum(1 for line in (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines() if line.strip())
+    raw_steps = [line for line in (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    steps = len(raw_steps)
+    recorded = []
+    for line in raw_steps:
+        try:
+            recorded.append(json.loads(line))
+        except ValueError:
+            pass            # a damaged line is the validator's finding (shown below), not a reason for the summary to fail
     lines = [f"run {manifest['run_id']}", f"  variant {manifest['variant']}, condition {manifest['condition']}, "
              f"model {manifest['model_id']}", f"  ended: {manifest['termination_reason']} after {steps} step(s)"]
     if manifest["harness_error"]:
@@ -393,6 +406,7 @@ def summarize(run_dir: Path) -> str:
         # `down` itself failed, so what survived was never counted: the attacker may still be running until the
         # next run's sweep (or `run.py sweep`) removes it.
         lines.append(f"  WARNING: teardown failed ({notes['down_error']}); lab resources may still be running")
+    lines += report_lines(recorded)       # special-token text (D-077): step numbers only, never the text
     return "\n".join(lines)
 
 
