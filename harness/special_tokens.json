@@ -1,0 +1,175 @@
+{
+  "weights_sha256": "sha256:d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+  "tokenizer_model": "gpt2",
+  "vocabulary_size": 151936,
+  "types_included": [
+    2,
+    3,
+    4
+  ],
+  "server_build": "b12478-8d1599fca",
+  "tokens": [
+    {
+      "id": 128247,
+      "text": "</s>",
+      "type": 1,
+      "origin": "server"
+    },
+    {
+      "id": 151643,
+      "text": "<|endoftext|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151644,
+      "text": "<|im_start|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151645,
+      "text": "<|im_end|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151646,
+      "text": "<|object_ref_start|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151647,
+      "text": "<|object_ref_end|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151648,
+      "text": "<|box_start|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151649,
+      "text": "<|box_end|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151650,
+      "text": "<|quad_start|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151651,
+      "text": "<|quad_end|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151652,
+      "text": "<|vision_start|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151653,
+      "text": "<|vision_end|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151654,
+      "text": "<|vision_pad|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151655,
+      "text": "<|image_pad|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151656,
+      "text": "<|video_pad|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151657,
+      "text": "<tool_call>",
+      "type": 4,
+      "origin": "gguf"
+    },
+    {
+      "id": 151658,
+      "text": "</tool_call>",
+      "type": 4,
+      "origin": "gguf"
+    },
+    {
+      "id": 151659,
+      "text": "<|fim_prefix|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151660,
+      "text": "<|fim_middle|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151661,
+      "text": "<|fim_suffix|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151662,
+      "text": "<|fim_pad|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151663,
+      "text": "<|repo_name|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151664,
+      "text": "<|file_sep|>",
+      "type": 3,
+      "origin": "gguf"
+    },
+    {
+      "id": 151665,
+      "text": "<tool_response>",
+      "type": 4,
+      "origin": "gguf"
+    },
+    {
+      "id": 151666,
+      "text": "</tool_response>",
+      "type": 4,
+      "origin": "gguf"
+    },
+    {
+      "id": 151667,
+      "text": "<think>",
+      "type": 4,
+      "origin": "gguf"
+    },
+    {
+      "id": 151668,
+      "text": "</think>",
+      "type": 4,
+      "origin": "gguf"
+    }
+  ]
+}
