@@ -1594,3 +1594,19 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Left as it was:** `prompts/`, `scoring/`, `schemas/`, the pin, the images and Docker files. The `trajectory-analyst` prompt gains one sentence (a space after the first character of a special-token string in `output_sent_to_model` is the harness's, not the target's).
 
 **Constrains:** PLAN.md phases 5 and 6 (this changes what the model is shown, so it freezes with the rest of the harness commit); `harness/execution.py` (`sanitize`); `harness/gguf_tokens.py` and `harness/special_tokens.json` (rewritten for any other model or build).
+
+---
+
+## D-078: Monetary cost is out of scope for the rest of the project
+**Date:** 2026-11-18 · **Status:** accepted (the author's instruction in chat, 2026-11-18: "since we are using a local model, we can forgo anything related to monetary cost from this point forward") · **Supersedes:** the money parts of D-006 (the "$5–10 for 75 runs" estimate), D-016 (the Nova Pro dollar figures and the cost estimate), D-023 (the budget-fit argument, "under USD 1, which fits the USD 10 budget"), and phase 5's "estimate the cost per run" bullet and the "cost estimate fits the budget" clause in its Done-when · **Relates to:** D-060, D-067, D-076
+
+**Decision.**
+- **No dollar figure is estimated, checked against a budget or used as a reason.** A design is not argued for or against on what it costs in money, a review does not raise cost as a finding, and no gate depends on it. The pilot no longer estimates a cost per run. The sample size per cell is set by power and the pre-registered matrix (D-023), not by a price.
+- **What stays.** Wall-clock time and hardware limits are operational facts, not money, and this entry does not touch them: the GPU headroom, the 24K window and the full prefill per step (D-060, D-068, D-069) stay as recorded. Token counts are still recorded and still matter for `context_limit`.
+- **Left as it was, because the AWS account is the author's.** The AWS Budgets alarm and `infra/bootstrap`'s budget, `budget-notifications.local.json`, the Bedrock backend, and `harness/filter_probe.py`'s printed Bedrock cost estimate (its `PRICES` table and the test that pins it). The probe is a merged measurement tool for D-067's block-rate result, and no decision uses its dollar line. If the author wants any of these removed, a new entry says so.
+
+**Why.** D-067 made the evaluated model a locally served one, which makes no API call. The only money this project ever spent was Bedrock's, and D-067 had already noted that the dollar figures "do not carry over".
+
+**Changed.** PLAN.md (phase 5's pilot bullet, its cost-estimate bullet and "Done when", phase 7's matrix note and its sample-size sentence, one risk-table row, the Decisions footer), CLAUDE.md (the status paragraph and a new working rule), and the two review agents that mention cost (`methodology-reviewer` gains an out-of-scope line, `architecture-advisor` loses "keep costs bounded"). Old entries are not edited.
+
+**Constrains:** PLAN.md phases 5 to 7; the review agents (neither reports monetary cost).

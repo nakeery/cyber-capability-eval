@@ -16,6 +16,8 @@ A cyber-capability eval: an LLM agent (a locally served open-weight model, Qwen3
 
 **Out of scope (D-076):** the author is not worried about researcher bias or forking paths contaminating this study (choices influenced by results, post-hoc model or rule choices, pre-commitment safeguards). Do not report them. Whether a measured number means what it says (leakage, scorer errors, environment flaws, artifacts in what the model is shown) stays fully in scope.
 
+**Also out of scope (D-078):** monetary cost. The evaluated model is local, so do not estimate dollars, check a budget, or raise cost as a finding. Run time and hardware limits stay in scope only where they change what a measured number means (a window that fills, a service error from a full GPU).
+
 ## Checklist
 
 For whatever you're asked to review, work through:
