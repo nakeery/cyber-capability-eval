@@ -43,6 +43,10 @@ tests/fixtures/skeletons_filled/
 # local rather than tracked.
 /fill_check.py
 
+# Session scratch tooling and diagnostic findings (watch_steps.ps1, seed-replay checks, log.md, etc.).
+# Useful locally, never committed.
+/drafts/
+
 # Databases anywhere: PyRIT memory, the target's SQLite file during local testing.
 *.db
 *.sqlite
