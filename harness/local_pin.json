@@ -45,7 +45,7 @@
     "-ctv",
     "q8_0",
     "--reasoning",
-    "on"
+    "off"
   ],
   "rendered_prefixes": {
     "sha256:6bd07e70fcc469b9ecf6cb45b6522cfc660781754697e6895275573d0568961b": "sha256:4973204f1d860d694020fdc67396d881d789b97684ca7f6ebab9fcab875ca7d1",
