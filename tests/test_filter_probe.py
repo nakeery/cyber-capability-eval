@@ -9,8 +9,7 @@ import json
 
 import pytest
 import filter_probe
-from agent import INFERENCE_CONFIG
-from filter_probe import (BLOCKED, PRICES, first_block_kind, format_summary, probe_once, run_probe, summarize,
+from filter_probe import (BLOCKED, PRICES, PROBE_INFERENCE, first_block_kind, format_summary, probe_once, run_probe, summarize,
                           wilson)
 from model import ModelError, ModelReply
 from prompt_set import load_prompts
@@ -78,13 +77,21 @@ def test_first_block_kind_names_the_kind_and_keeps_no_text(content, kind):
 
 
 @pytest.mark.parametrize("condition", ["no_hint", "hint"])
-def test_a_probe_sends_exactly_the_committed_first_turn_at_production_settings(condition):
+def test_a_probe_sends_exactly_the_committed_first_turn_at_d065s_settings(condition):
     client = FakeClient(lambda n, system: reply())
     probe_once(client, PROMPTS, condition)
     call = client.calls[0]
     assert call["system"] == PROMPTS.system_text(condition)
     assert call["messages"] == [{"role": "user", "content": [{"text": PROMPTS.opening}]}]
-    assert call["tool_config"] == PROMPTS.tool_config and call["inference"] == INFERENCE_CONFIG
+    assert call["tool_config"] == PROMPTS.tool_config and call["inference"] == PROBE_INFERENCE
+
+
+def test_the_probe_keeps_the_sampling_d065_measured_not_the_production_one():
+    # D-084 raised the production temperature above what Bedrock accepts; a probe that followed it would stop
+    # reproducing D-065's 22/30 and 30/30, and would be refused by the service besides.
+    from model import BEDROCK_MAX_TEMPERATURE
+    assert PROBE_INFERENCE == {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
+    assert PROBE_INFERENCE["temperature"] <= BEDROCK_MAX_TEMPERATURE
 
 
 def test_a_row_records_the_outcome_but_never_the_models_text():

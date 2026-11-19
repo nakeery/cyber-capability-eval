@@ -74,6 +74,17 @@ MUTATIONS = {
     "provenance set drops schemas": (
         '    "schemas",  # validate_record decides both the refusals and the score\'s own validity\n', ""),
     "cli accepts any commit": ("commit = resolve_scorer_commit()", 'commit = "f" * 40'),
+    # development scoring over uncommitted code (D-086)
+    "strict resolver ignores dirty paths": (
+        '    if dirty:\n        raise CommitError("scoring code has uncommitted changes',
+        '    if False:\n        raise CommitError("scoring code has uncommitted changes'),
+    "default cli path is lenient": (
+        "        if args.allow_dirty:\n            commit, dirty", "        if True:\n            commit, dirty"),
+    "cli drops the dirty marker": ("write=not args.no_write, scorer_dirty_paths=dirty)", "write=not args.no_write)"),
+    "score drops the dirty marker": (
+        '        score["scorer_dirty_paths"] = sorted(set(scorer_dirty_paths))', "        pass"),
+    "provenance honours showUntrackedFiles=no": ('"--untracked-files=all", ', ""),
+    "provenance strips the status column": ('return done.stdout.rstrip("\\n")', "return done.stdout.strip()"),
 }
 
 

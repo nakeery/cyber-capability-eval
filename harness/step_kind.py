@@ -55,10 +55,12 @@ def models_own_words(step: dict) -> bool:
 def ends_text_only_after_a_command(steps: list[dict], termination_reason: str, *, attempts: bool = False) -> bool:
     """The run ENDED because the model stopped after having run a command (D-075's definition of the count).
 
-    This is the count D-067's spike warned about: the model explaining instead of continuing, which ends a run
-    with no nudge (D-063). All of these must hold:
-      * the run's `termination_reason` is `agent_stopped`. The question the count answers is whether the no-nudge
-        rule cuts runs short, and a text-only turn on the last step the cap allowed, or on a window the harness
+    This is the count D-067's spike warned about: the model explaining instead of continuing. Under D-063 any
+    text-only turn ended a run; under D-083 only the turn that makes `text_only_limit` consecutive text-only turns
+    does (the earlier ones are nudged, `nudged: true`), and `hit_the_nudge_limit` below says which of these ended
+    that way. All of these must hold:
+      * the run's `termination_reason` is `agent_stopped`. The question the count answers is whether stopping
+        cuts runs short, and a text-only turn on the last step the cap allowed, or on a window the harness
         judged full, ended the run anyway (`step_cap`, `context_limit`) and cost nothing;
       * its last step is a text-only turn that the MODEL ended: `stop_reason` is `end_turn` or `stop_sequence`. The
         loop calls ANY empty reply text-only, whatever the stop reason, but an empty reply with another stop reason
@@ -75,3 +77,21 @@ def ends_text_only_after_a_command(steps: list[dict], termination_reason: str, *
         return False
     counted = {"run_command", "malformed"} if attempts else {"run_command"}
     return any(step_kind(step) in counted for step in earlier)
+
+
+def hit_the_nudge_limit(steps: list[dict], termination_reason: str) -> bool:
+    """The run ended because the model stayed text-only through every nudge it was given (D-083, D-084).
+
+    D-083 promised to report how often the limit itself is reached, and `ends_text_only_after_a_command` cannot
+    say: it also counts a run that ended on its FIRST text-only turn (limit 1, or a turn the nudge never reached)
+    and a run ended by an empty reply, which is structural and never nudged. All of these must hold:
+      * `agent_stopped`, and the last step is the model's own text-only turn (`end_turn` or `stop_sequence`);
+      * the last step has text: an empty reply cannot be carried into a next request, so it is never nudged and
+        says nothing about the limit;
+      * the step before it was a nudged one: the limit is reached on a streak, and a streak the loop answered
+        with a nudge leaves a `nudged` step directly before the one that ended the run."""
+    if termination_reason != "agent_stopped" or len(steps) < 2:
+        return False
+    *_, previous, last = steps
+    return (step_kind(last) == "text_only" and last.get("stop_reason") in MODEL_STOPS
+            and bool(last.get("assistant_text")) and not last.get("nudged") and bool(previous.get("nudged")))

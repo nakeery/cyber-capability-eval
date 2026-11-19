@@ -7,6 +7,7 @@ directory it leaves validates.
 """
 
 import dataclasses
+import functools
 import json
 import re
 import shutil
@@ -14,11 +15,18 @@ import subprocess
 from datetime import datetime, timezone
 
 import pytest
-from harness_fakes import FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
+from agent import INFERENCE_CONFIG, Limits
+from harness_fakes import BEDROCK_INFERENCE, FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
 from lab import HarnessError
 from model import ModelError
 from prompt_set import load_prompts
-from run import (UNKNOWN_DIGEST, execute_run, find_orphans, git_provenance, new_seed, run_lock, summarize)
+from run import (UNKNOWN_DIGEST, default_score, find_orphans, git_provenance, new_seed, run_lock, summarize)
+from run import execute_run as _execute_run
+
+# Every FakeModel in this file is labeled backend "bedrock", and the production temperature (D-084) is above what a
+# Bedrock manifest may record (schemas/run_manifest.schema.json). So a run of one records a Bedrock-legal config;
+# the local-model helper below passes the production INFERENCE_CONFIG explicitly.
+execute_run = functools.partial(_execute_run, inference=BEDROCK_INFERENCE)
 from telemetry import validate_record, validate_run_dir
 from variant_registry import VARIANTS
 
@@ -90,7 +98,7 @@ class FakeLab:
 
 
 def make(tmp_path, script, *, variant="B", condition="no_hint", lab_kwargs=None, results=None, seed=None, prompts=PROMPTS,
-         score_fn=None, dirty=(), exec_seconds=0.0, latency=0.0, executor=None):
+         score_fn=None, dirty=(), exec_seconds=0.0, latency=0.0, executor=None, limits=None):
     clock = FakeClock()
     lab = FakeLab(clock, run_dir=tmp_path, **(lab_kwargs or {}))
     model = FakeModel(script, clock, latency)
@@ -98,7 +106,10 @@ def make(tmp_path, script, *, variant="B", condition="no_hint", lab_kwargs=None,
     run_dir = execute_run(
         variant=variant, condition=condition, lab=lab, model=model, prompts=prompts, runs_dir=tmp_path, clock=clock,
         harness_commit=COMMIT, dirty_paths=list(dirty), order_seed=7, seed=seed or new_seed(variant), score_fn=score_fn,
-        executor_factory=lambda _lab: executor or FakeExecutor(clock, results, exec_seconds))
+        executor_factory=lambda _lab: executor or FakeExecutor(clock, results, exec_seconds),
+        # D-083's production default is 4; most of these tests use a bare text_reply() just to end the
+        # script cleanly, written before the nudge existed. A test actually about it passes its own.
+        limits=limits if limits is not None else Limits(text_only_limit=1), inference=BEDROCK_INFERENCE)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     steps = [json.loads(line) for line in (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines() if line]
@@ -119,16 +130,39 @@ def test_a_run_leaves_a_directory_that_validates(tmp_path):
     assert sorted(p.name for p in run_dir.iterdir()) == ["harness_notes.json", "manifest.json", "steps.jsonl", "target_events.jsonl"]
 
 
+def test_the_manifest_schema_caps_temperature_for_a_bedrock_run_only(tmp_path):
+    # D-084: the production temperature (1.2) is above Bedrock's 0-1 range. A Bedrock manifest (backend bedrock, or no
+    # backend at all, as before D-060) must not claim it; a local run's manifest may.
+    _, manifest, *_ = make(tmp_path, [text_reply()])
+    hot = {**manifest, "inference_config": {**manifest["inference_config"], "temperature": 1.2}}
+    assert any("temperature" in problem for problem in validate_record("manifest", hot))
+    no_backend = {key: value for key, value in hot.items() if key != "backend"}
+    assert any("temperature" in problem for problem in validate_record("manifest", no_backend))
+    cold = {**manifest, "inference_config": {**manifest["inference_config"], "temperature": -0.1}}
+    assert any("temperature" in problem for problem in validate_record("manifest", cold))
+
+
+def test_a_local_run_records_the_production_sampling_and_validates(tmp_path):
+    _, manifest, _, _, model = run_local(tmp_path, [text_reply()])
+    assert manifest["backend"] == "local" and manifest["inference_config"] == INFERENCE_CONFIG
+    assert model.requests[0]["inference"] == manifest["inference_config"]      # recorded = sent
+    assert manifest["inference_config"]["temperature"] > 1
+    assert validate_record("manifest", manifest) == []
+
+
 def test_the_manifest_records_what_ran(tmp_path):
     seed = new_seed("B")
-    run_dir, manifest, *_ = make(tmp_path, [text_reply()], condition="hint", seed=seed)
+    run_dir, manifest, notes, steps, lab, model = make(tmp_path, [text_reply()], condition="hint", seed=seed)
     assert validate_record("manifest", manifest) == []
+    # What the manifest says the sampling was is what the model was sent: both come from the one value execute_run
+    # was given, and nothing else would notice if they drifted apart.
+    assert model.requests[0]["inference"] == manifest["inference_config"]
     assert manifest["variant_config"] == VARIANTS["B"]["variant_config"] and manifest["variant"] == "B"
     assert (manifest["flag"], manifest["admin_password"]) == (seed["flag"], seed["admin_password"])
     assert manifest["system_prompt_hash"] == PROMPTS.system_prompt_hash("hint")
     assert manifest["hint_text"] == PROMPTS.hint and manifest["condition"] == "hint"
     assert (manifest["backend"], manifest["region"], manifest["model_id"]) == ("bedrock", "us-east-1", "fake-model")
-    assert manifest["inference_config"] == {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
+    assert manifest["inference_config"] == BEDROCK_INFERENCE
     assert (manifest["step_cap"], manifest["harness_commit"], manifest["run_order_seed"]) == (30, COMMIT, 7)
     assert manifest["image_digests"] == {"attacker": "sha256:" + "a" * 64, "target": "sha256:" + "c" * 64}
     assert manifest["docker_version"] == "29.9.2" and manifest["target_health_start"] == "healthy"
@@ -274,7 +308,7 @@ def test_every_failing_end_step_is_kept_and_the_rest_still_run(tmp_path):
     lab = Flaky(clock, run_dir=tmp_path)
     run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([text_reply()], clock), prompts=PROMPTS,
                           runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
-                          executor_factory=lambda _l: FakeExecutor(clock))
+                          executor_factory=lambda _l: FakeExecutor(clock), limits=Limits(text_only_limit=1))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     assert any("would not stop" in p for p in notes["finish_problems"])
     assert {"stop_target", "collect_events", "down"} <= set(lab.calls)       # none of the rest was skipped
@@ -344,7 +378,8 @@ def test_ctrl_c_during_teardown_still_writes_the_record_and_then_propagates(tmp_
     lab = InterruptedDown(clock, run_dir=tmp_path)
     with pytest.raises(KeyboardInterrupt):
         execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([text_reply()], clock),
-                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT)
+                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
+                    limits=Limits(text_only_limit=1))
     run_dir = tmp_path / RUN_ID
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     assert "KeyboardInterrupt" in notes["down_error"]
@@ -533,7 +568,8 @@ def test_the_target_is_probed_with_retries_during_the_run(tmp_path):
     clock = FakeClock()
     lab = Recording(clock, run_dir=tmp_path)
     execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([command("ls"), text_reply()], clock), prompts=PROMPTS,
-                runs_dir=tmp_path, clock=clock, harness_commit=COMMIT, executor_factory=lambda _l: FakeExecutor(clock))
+                runs_dir=tmp_path, clock=clock, harness_commit=COMMIT, executor_factory=lambda _l: FakeExecutor(clock),
+                limits=Limits(text_only_limit=1))
     assert "health:4" in lab.calls            # after the command; the start and final probes are single
 
 
@@ -586,12 +622,14 @@ class FakeLocalModel(FakeModel):
                 "rendered_prefix_sha256": "sha256:" + "e" * 64, "weights_path": self.weights_path}
 
 
-def run_local(tmp_path, script, *, seed=None, **model_kwargs):
+def run_local(tmp_path, script, *, seed=None, limits=None, **model_kwargs):
     clock = FakeClock()
     lab = FakeLab(clock, run_dir=tmp_path)
     model = FakeLocalModel(script, clock, lab=lab, **model_kwargs)
     run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=model, prompts=PROMPTS, runs_dir=tmp_path, clock=clock,
-                          harness_commit=COMMIT, seed=seed or new_seed("B"), executor_factory=lambda _l: FakeExecutor(clock))
+                          harness_commit=COMMIT, seed=seed or new_seed("B"), executor_factory=lambda _l: FakeExecutor(clock),
+                          limits=limits if limits is not None else Limits(text_only_limit=1),
+                          inference=INFERENCE_CONFIG)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     return run_dir, manifest, notes, lab, model
@@ -662,3 +700,71 @@ def test_weights_that_do_not_match_the_pin_end_the_run_before_any_docker_work(tm
         FakeLocalModel.weights_path = None
     assert manifest["termination_reason"] == "harness_error" and "pinned SHA-256" in manifest["harness_error"]
     assert lab.calls == ["down"] and model.requests == []
+
+
+# --- scoring a development run over uncommitted scoring code (D-086) -----------------------------
+
+def test_default_score_refuses_uncommitted_scoring_code_unless_the_run_allows_dirty(tmp_path, monkeypatch):
+    import scorer
+
+    calls = []
+    monkeypatch.setattr(scorer, "scorer_provenance", lambda: ("d" * 40, ["scoring/scorer.py"]))
+    monkeypatch.setattr(scorer, "resolve_scorer_commit",
+                        lambda: (_ for _ in ()).throw(scorer.CommitError("scoring code has uncommitted changes")))
+    monkeypatch.setattr(scorer, "score_run_dir", lambda run_dir, commit, **kw: calls.append((commit, kw)) or ({}, []))
+    with pytest.raises(scorer.CommitError):
+        default_score(tmp_path)                                      # strict by default
+    assert calls == []
+    default_score(tmp_path, allow_dirty=True)
+    assert calls == [("d" * 40, {"scorer_dirty_paths": ["scoring/scorer.py"]})]
+
+
+def test_the_summary_reads_the_development_marker_from_score_json_never_from_the_notes(tmp_path):
+    # score.json is the only authority (D-086). The notes hold a run-time snapshot with no marker, so a rescore,
+    # which rewrites score.json and not the notes, can never leave the summary saying the old thing.
+    def score_fn(run_dir):
+        (run_dir / "score.json").write_text(json.dumps({"scorer_dirty_paths": ["scoring/scorer.py"]}), encoding="utf-8")
+        return {"pass": False, "milestones": []}, []
+
+    run_dir, _, notes, *_ = make(tmp_path, [text_reply()], score_fn=score_fn)
+    assert "scorer_dirty_paths" not in notes["score"]
+    assert "DEVELOPMENT SCORE" in summarize(run_dir) and "scoring/scorer.py" in summarize(run_dir)
+    (run_dir / "score.json").write_text(json.dumps({"pass": False}), encoding="utf-8")     # a clean rescore
+    assert "DEVELOPMENT SCORE" not in summarize(run_dir)
+
+
+def test_an_unreadable_score_json_never_breaks_the_summary(tmp_path):
+    run_dir, *_ = make(tmp_path, [text_reply()], score_fn=lambda _d: ({"pass": False, "milestones": []}, []))
+    (run_dir / "score.json").write_text("{not json", encoding="utf-8")
+    assert "DEVELOPMENT SCORE" not in summarize(run_dir)
+
+
+# --- the study-data guard (D-086) ----------------------------------------------------------------
+
+def test_study_validation_rejects_a_development_score_and_a_clean_rescore_clears_it(tmp_path):
+    import scorer
+
+    run_dir, *_ = make(tmp_path, [text_reply()])
+    scorer.score_run_dir(run_dir, "d" * 40, scorer_dirty_paths=["scoring/scorer.py"])
+    assert validate_run_dir(run_dir) == []                              # a valid record, as every development score is
+    problems = validate_run_dir(run_dir, study=True)
+    assert len(problems) == 1 and "development score" in problems[0] and "scoring/scorer.py" in problems[0]
+    scorer.score_run_dir(run_dir, "d" * 40)                             # replaced by an ordinary score
+    assert validate_run_dir(run_dir, study=True) == []
+
+
+def test_study_validation_rejects_a_run_made_with_uncommitted_code_even_when_its_score_is_clean(tmp_path):
+    import scorer
+
+    run_dir, *_ = make(tmp_path, [text_reply()], dirty=("harness/agent.py",))
+    scorer.score_run_dir(run_dir, "d" * 40)
+    assert validate_run_dir(run_dir) == []
+    problems = validate_run_dir(run_dir, study=True)
+    assert len(problems) == 1 and "development run" in problems[0] and "harness/agent.py" in problems[0]
+
+
+def test_study_validation_of_an_ordinary_run_is_empty_and_an_unreadable_notes_file_is_not_trusted(tmp_path):
+    run_dir, *_ = make(tmp_path, [text_reply()])
+    assert validate_run_dir(run_dir, study=True) == []
+    (run_dir / "harness_notes.json").write_text("{not json", encoding="utf-8")
+    assert any("harness_notes.json" in problem for problem in validate_run_dir(run_dir, study=True))

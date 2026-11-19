@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import telemetry
-from agent import run_agent
+from agent import Limits, run_agent
 import local_model  # noqa: E402
 from harness_fakes import RUN_ID, SECRETS, FakeClock, FakeExecutor, outcome
 from local_model import (NEUTRAL_SAMPLER, ZERO_HASH, LocalClient, LocalPin, ServerCheckError, parse_completion,
@@ -553,13 +553,16 @@ def test_the_sampler_defaults_to_the_neutral_sampler(pin):
 
 # --- the end-to-end loop on the stub ------------------------------------------------------------
 
-def run_scripted(stub, client, replies):
+def run_scripted(stub, client, replies, *, limits=None):
     stub.completions.extend((200, reply) for reply in replies)
     clock = FakeClock()
     executor = FakeExecutor(clock, [outcome("notes.txt\n")])
     steps: list[dict] = []
+    # D-083's production default is 4; every test here uses one bare text-only reply just to end the
+    # script, written before the nudge existed. A test actually about it passes its own `limits`.
     result = run_agent(model=client, executor=executor, prompts=load_prompts(), condition="no_hint",
-                       run_id=RUN_ID, secrets=SECRETS, clock=clock, health=lambda: True, on_step=steps.append)
+                       run_id=RUN_ID, secrets=SECRETS, clock=clock, health=lambda: True, on_step=steps.append,
+                       limits=limits if limits is not None else Limits(text_only_limit=1))
     return result, steps
 
 
