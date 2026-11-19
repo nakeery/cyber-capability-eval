@@ -1786,3 +1786,22 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Limits, stated:** the field names paths, not content, so two different uncommitted states of the same file look identical. A content hash of the differing files would close that (a sha256 of `git diff HEAD` over the paths plus the untracked files' bytes would do), and is not built; a development score is not meant to be reproduced, only replaced.
 
 **Constrains:** `scoring/scorer.py` (`scorer_provenance`, `resolve_scorer_commit`, `score_run`, `score_run_dir`, the CLI flag), `schemas/score.schema.json`, `harness/run.py` (`default_score`, `summarize`, `git_provenance`), `harness/telemetry.py` (`validate_run_dir`'s `study` flag); tests in `tests/test_scorer.py` and `tests/test_run.py`; `tests/mutation_check.py` now breaks 31 rules (six new, for this entry), all killed.
+
+---
+
+## D-087: The real-Docker test modules hold the harness's lock, so a sweep or a run cannot overlap them
+
+**Date:** 2026-11-19 · **Status:** accepted (the author: "make the small change on this branch") · **Relates to:** D-042 (the sweep removes every lab stack), D-065 (the lock), D-075
+
+**The observation:** after a development session the author ran `run.py sweep` and it removed 2 containers and 1 network, exactly one lab stack, although every real-lab test run in the session had torn down cleanly (`left_after_down` empty, nothing swept at its start). The explanation that fits is an overlap: `run_lock` is taken only by the CLI (`main`), and `execute_run` and `Lab`, which the Docker tests call directly, never take it, so a `sweep` from a terminal could not tell a running test lab from a leftover and removed it. It would also explain one test failing 0.25 s after start with "container ... is not running" (variant A of `test_a_scripted_run_against_the_real_lab_leaves_a_valid_scored_record`, with 0 swept at its start); it is not proven, and does not clearly explain an earlier failure of the same test. The reverse overlap is worse: `execute_run` sweeps first, so a Docker test started during a real run would remove that run's lab.
+
+**Decision:**
+- **`tests/conftest.py` has a module-scoped fixture, `lab_lock`, that holds `run.run_lock()`**, the same lock file (`runs/.lab.lock`) the CLI takes for a run and for `sweep`. `tests/test_lab_docker.py` and `tests/test_run_docker.py`, the two modules that build a real lab, use it through `pytestmark`, after their Docker-and-images skip, so a machine without Docker takes no lock.
+- **Either overlap now fails at once with the lock's own message** ("another harness is running, or one crashed"): a CLI `run` or `sweep` during those tests, and those tests during a CLI run. Verified by hand in both directions (a held lock errors the tests; a sweep started while the tests ran was refused with exit code 1; the lock is released afterwards).
+- **They fail, they do not skip.** A skip would hide the conflict; `pytest` is unusable while a real run is going, which is the point.
+- **A stale lock** from a killed pytest is deleted by hand, as for the CLI.
+- **`tests/test_lab_lock.py` pins the wiring** (each Docker module uses `lab_lock`, the skip is listed first, and any test module that gates on `_docker_ready` is in the covered list), because dropping the fixture would silently bring the overlap back and no Docker-free test would notice. The lock's own behavior is `run_lock`'s, tested in `tests/test_run.py`.
+
+**Rejected:** taking the lock inside `execute_run` (`main` already holds it around the whole run, so a second acquisition would deadlock on itself; the lock file lives in the `runs_dir` argument, which the tests point at a temporary directory, so it would not conflict with the CLI; and the fake-lab unit tests would need a way to opt out), which is a larger change touching `execute_run`'s signature and a dozen call sites, and is not needed to close the overlap; a skip when the lock is held (above).
+
+**Constrains:** `tests/conftest.py` (`lab_lock`), `tests/test_lab_docker.py` and `tests/test_run_docker.py` (`pytestmark`), `tests/test_lab_lock.py`. No harness code changed.

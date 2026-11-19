@@ -163,3 +163,18 @@ def label():
 @pytest.fixture
 def intent():
     return copy.deepcopy(_INTENT)
+
+
+@pytest.fixture(scope="module")
+def lab_lock():
+    """Hold the harness's own lock while a module talks to real Docker (D-087).
+
+    Lab resources are global: `Lab.sweep` removes EVERY lab stack, and `execute_run` sweeps first. The CLI
+    takes `run_lock` for a run and for `sweep`, but a test that calls `Lab` or `execute_run` directly never
+    did, so a `run.py sweep` (or a real run) overlapping a Docker test removed the test's live lab, and the
+    test's own sweep would remove a real run's. Holding the same lock here makes either overlap fail at once
+    with the lock's own message ("another harness is running") instead of silently killing a lab. A stale lock
+    from a killed pytest is deleted by hand, as for the CLI."""
+    from run import run_lock
+    with run_lock():
+        yield
