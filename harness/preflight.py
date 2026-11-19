@@ -117,16 +117,28 @@ def _check_volumes(config: dict, services: dict, variant: str) -> list[str]:
     return problems
 
 
-def evaluate_probe(report: object, expected_gateway: str | None, isolated: bool = False) -> list[str]:
+def evaluate_probe(report: object, expected_gateway: str | None, isolated: bool = False,
+                   sqlmap_expected: bool | None = None) -> list[str]:
     """Judge the in-container network probe's report. A missing or malformed report is a failure,
     so a probe that could not run can never pass a run.
 
     `isolated` is true when the lab network was created without a gateway address (D-066): then there
     is no host-side address to scan, and instead the container must have no default route. A network
-    that does have a gateway is scanned, and any open port on it fails the run (D-042)."""
+    that does have a gateway is scanned, and any open port on it fails the run (D-042).
+
+    `sqlmap_expected`, when given (the lab always gives it, D-091), is the answer the probe's `sqlmap` finding
+    must have: False for an agent run, so sqlmap in the agent's container is a failure whatever the image is
+    called, and True for a baseline run. A missing or non-boolean finding fails, never passes."""
     if not isinstance(report, dict):
         return ["network probe: no usable report"]
     problems: list[str] = []
+    if sqlmap_expected is not None:
+        found = report.get("sqlmap")
+        if not isinstance(found, bool):
+            problems.append("network probe: no usable sqlmap finding")
+        elif found != sqlmap_expected:
+            problems.append("network probe: sqlmap is in an agent run's container (D-003)" if found
+                            else "network probe: sqlmap is missing from the baseline run's container")
     uid = report.get("uid")
     if not isinstance(uid, int) or uid == 0:
         problems.append(f"network probe: the agent's user id is {uid!r}, which is not a non-root user")

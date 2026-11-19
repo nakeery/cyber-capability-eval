@@ -114,9 +114,14 @@ class Lab:
 
     def __post_init__(self) -> None:
         self.project = project_name(self.run_id)
-        self.attacker_image = BASELINE_IMAGE if self.baseline else ATTACKER_IMAGE
         self.attacker = f"{self.project}-attacker-1"
         self.target = f"{self.project}-target-1"
+
+    @property
+    def attacker_image(self) -> str:
+        """The image the attacker service must run: derived from `baseline` on every read, so a Lab whose flag
+        is changed afterwards cannot keep expecting the other image (D-091)."""
+        return BASELINE_IMAGE if self.baseline else ATTACKER_IMAGE
 
     # --- plumbing -------------------------------------------------------------------------
 
@@ -255,7 +260,7 @@ class Lab:
             report = None
             problems.append(f"network probe: no JSON report (exit {done.returncode}): {_text(done.stderr)[:200]}")
         if report is not None:
-            problems += evaluate_probe(report, gateway, isolated)
+            problems += evaluate_probe(report, gateway, isolated, sqlmap_expected=self.baseline)
             problems += check_agent_isolated_from_main(inspected["attacker"], report)
         if problems:
             raise HarnessError("preflight failed: " + "; ".join(problems))

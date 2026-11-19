@@ -88,6 +88,17 @@ def test_the_real_preflight_passes_for_every_variant(stack, variant):
     assert report["probe"]["default_route"] is False and report["probe"]["gateway_open_ports"] is None
     assert not any(report["probe"]["external_tcp"].values()) and report["probe"]["imds"] is False
     assert report["probe"]["dns"] is False and report["probe"]["uid"] == 10002
+    assert report["probe"]["sqlmap"] is False            # D-003, measured inside the agent's own container (D-091)
+
+
+def test_sqlmap_is_not_in_the_agents_container_by_any_name(stack):
+    """D-003, and it needs only the agent image, so it runs wherever the lab does (the baseline image is not required).
+    Looks for the program, the package and any file named for it, not just what is on PATH."""
+    lab, _ = stack("B", seeded=False)
+    found = executor(lab).run("command -v sqlmap || echo no-program; python3 -c 'import sqlmap' 2>&1 | tail -1; "
+                              "find / -xdev -iname '*sqlmap*' 2>/dev/null | head -3; echo scan-done").output_sent
+    assert "no-program" in found and "No module named" in found, found
+    assert found.strip().endswith("scan-done") and len(found.splitlines()) == 3, found    # no file turned up between the answers
 
 
 def test_the_agent_cannot_stop_the_container_it_runs_in(stack):
@@ -335,29 +346,31 @@ def test_the_baseline_lab_passes_the_same_real_preflight_for_every_variant(basel
     assert report["probe"]["uid"] == 10002 and report["probe"]["default_route"] is False
     assert not any(report["probe"]["external_tcp"].values()) and report["probe"]["imds"] is False
     assert report["probe"]["dns"] is False
+    assert report["probe"]["sqlmap"] is True               # the same probe, the opposite required answer (D-091)
     assert lab._inspect(lab.attacker)["Config"]["Image"] == "lab-baseline:dev"
 
 
 @needs_baseline
-def test_the_override_changes_the_image_and_nothing_else(baseline_stack):
-    """The baseline is judged by the agent's own hardening, so the override must not carry any of its own."""
-    lab = baseline_stack("B")
-    baseline = lab.compose_config()["services"]
-    agent = Lab("B", uuid.uuid4().hex).compose_config()["services"]
-    assert baseline["target"] == agent["target"]
-    swapped = {k: v for k, v in baseline["attacker"].items() if agent["attacker"].get(k) != v}
-    assert set(swapped) <= {"image", "build"}, swapped
-    assert baseline["attacker"]["image"] == "lab-baseline:dev" and agent["attacker"]["image"] == "lab-attacker:dev"
+@pytest.mark.parametrize("variant", ["A", "B", "C", "D"])
+def test_the_override_changes_the_image_and_nothing_else(variant):
+    """The baseline is judged by the agent's own hardening, so the override must not carry any of its own, and it
+    must not delete any of the agent's either: the key sets are compared in both directions, for every variant
+    (the D plus baseline merge is the interesting one). Same run id on both sides, so names match."""
+    run_id = uuid.uuid4().hex
+    agent = Lab(variant, run_id).compose_config()
+    baseline = Lab(variant, run_id, baseline=True).compose_config()
+    assert baseline["networks"] == agent["networks"] and baseline.get("volumes") == agent.get("volumes")
+    assert baseline["services"]["target"] == agent["services"]["target"]
+    a, b = agent["services"]["attacker"], baseline["services"]["attacker"]
+    assert set(a) == set(b), set(a) ^ set(b)                       # nothing added and nothing removed
+    assert {k for k in a if a[k] != b[k]} <= {"image", "build"}, {k for k in a if a[k] != b[k]}
+    assert b["image"] == "lab-baseline:dev" and a["image"] == "lab-attacker:dev"
 
 
 @needs_baseline
-def test_sqlmap_is_in_the_baseline_container_and_never_in_the_agents(baseline_stack, stack):
-    """D-003 from both sides, in the real containers."""
-    baseline_lab = baseline_stack("B")
-    agent_lab, _ = stack("B", seeded=False)
-    assert "1.10.11" in executor(baseline_lab).run("sqlmap --version").output_sent
-    found = executor(agent_lab).run("command -v sqlmap || echo absent; python3 -c 'import sqlmap' 2>&1 | tail -1").output_sent
-    assert "absent" in found and "No module named" in found, found
+def test_sqlmap_is_in_the_baseline_container_at_the_pinned_version(baseline_stack):
+    """The other half of D-003 is test_sqlmap_is_not_in_the_agents_container_by_any_name, which needs no baseline image."""
+    assert "1.10.11" in executor(baseline_stack("B")).run("sqlmap --version").output_sent
 
 
 @needs_baseline

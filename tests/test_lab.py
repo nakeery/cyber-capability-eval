@@ -38,7 +38,7 @@ GOOD_CONFIG = {
     },
 }
 GOOD_REPORT = {"uid": 10002, "cap_eff": "0000000000000000", "no_new_privs": 1, "seccomp": 2, "default_route": False, "external_tcp": {"1.1.1.1:443": False}, "imds": False,
-               "dns": False, "gateway": None, "gateway_open_ports": None}
+               "dns": False, "sqlmap": False, "gateway": None, "gateway_open_ports": None}
 # The network Docker made: isolated (no gateway address), or an ordinary internal one with a gateway.
 ISOLATED_NETWORK = json.dumps({"Internal": True, "IPAM": {"Config": [{"Subnet": "172.18.0.0/16"}]},
                                "Options": {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}}).encode()
@@ -737,8 +737,10 @@ def test_run_docker_writes_to_a_file_when_asked(tmp_path, monkeypatch):
 
 # --- a baseline lab's preflight judges the image it runs (D-089) -----------------------------------
 
-def baseline_responder(*, config_image="lab-baseline:dev", live_image="lab-baseline:dev"):
-    """The preflight responder with the attacker's image changed in the compose config and in the running container."""
+def baseline_responder(*, config_image="lab-baseline:dev", live_image="lab-baseline:dev", sqlmap=True):
+    """The preflight responder with the attacker's image changed in the compose config and in the running container,
+    and the probe's sqlmap finding set (a baseline container has it, an agent's must not)."""
+    probe = json.dumps({**GOOD_REPORT, "sqlmap": sqlmap}).encode()
     config = copy.deepcopy(GOOD_CONFIG)
     config["services"]["attacker"]["image"] = config_image
 
@@ -747,7 +749,7 @@ def baseline_responder(*, config_image="lab-baseline:dev", live_image="lab-basel
             info = good_inspect("attacker", "B", PROJECT)
             info["Config"]["Image"] = live_image
             return 0, json.dumps([info]).encode(), b""
-        return preflight_responder(config)(argv)
+        return preflight_responder(config, probe=probe)(argv)
     return respond
 
 
@@ -769,9 +771,36 @@ def test_an_agent_lab_refuses_the_baseline_image_in_the_file_and_in_the_running_
         box.preflight()
     assert "compose: the attacker's image is 'lab-baseline:dev'" in str(caught.value)
     assert "live attacker: runs image 'lab-baseline:dev'" in str(caught.value)
+    assert "sqlmap is in an agent run's container" in str(caught.value)    # the content check, not only the names
 
 
 def test_a_baseline_lab_refuses_a_running_container_whose_image_differs_from_the_file():
     box, _ = make_box(baseline_responder(live_image="lab-attacker:dev"), baseline=True)
     with pytest.raises(HarnessError, match="live attacker: runs image 'lab-attacker:dev'"):
         box.preflight()
+
+
+def test_a_retagged_image_cannot_hide_sqlmap_from_an_agent_runs_preflight():
+    """The names all say `lab-attacker:dev` (the file and the live container), but the container has sqlmap in it,
+    as if the tag had been repointed at the baseline image: only the probe's finding can see that (D-091)."""
+    box, _ = make_box(baseline_responder(config_image="lab-attacker:dev", live_image="lab-attacker:dev", sqlmap=True))
+    with pytest.raises(HarnessError, match="sqlmap is in an agent run's container"):
+        box.preflight()
+
+
+def test_a_baseline_lab_whose_image_has_no_sqlmap_fails():
+    box, _ = make_box(baseline_responder(sqlmap=False), baseline=True)
+    with pytest.raises(HarnessError, match="sqlmap is missing from the baseline"):
+        box.preflight()
+
+
+def test_the_expected_image_follows_the_baseline_flag_on_every_read():
+    box = Lab("B", RUN_ID, runner=FakeRunner())
+    assert box.attacker_image == "lab-attacker:dev"
+    box.baseline = True
+    assert box.attacker_image == "lab-baseline:dev"
+
+
+def test_a_baseline_labs_image_digests_name_the_real_image_ids():
+    box, _ = make_box(lambda argv: (0, b"sha256:abc123", b""), baseline=True)
+    assert box.image_digests() == {"attacker": "sha256:abc123", "target": "sha256:abc123"}

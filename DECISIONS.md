@@ -1891,3 +1891,34 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Not built yet (D-089's list, minus this entry):** the glue script, a baseline run command in `harness/run.py` or a sibling, a `containment-auditor` pass on the new container, the comparison table's code.
 
 **Constrains:** `baseline/`, `docker-compose.baseline.yml`, `harness/lab.py`, `harness/preflight.py`, `harness/run.py` (`build --baseline`), `tests/test_lab.py`, `tests/test_preflight.py`, `tests/test_lab_docker.py`.
+
+
+---
+
+## D-091: The containment audit of the baseline container (GO WITH CONDITIONS); sqlmap's presence is checked by content, and the constraints for the unbuilt runner are fixed
+
+**Date:** 2026-11-19 · **Status:** accepted for the fixes (they tighten checks and change no result); item 2 below amends D-089 item 7 and the author may revert it · **Corrects:** a sentence in D-090 · **Relates to:** D-003, D-065, D-075, D-089, D-090
+
+**The audit.** The `containment-auditor` reviewed commit b169f0e and returned GO WITH CONDITIONS, with nothing blocking the merge. It found no route from the baseline container to the host, the internet or the flag; no secret in the image, its layers or its environment; no state surviving between runs; and a merged compose config that differs from the agent's in exactly the image and the build context, for B-type and D-type stacks alike. Its conditions were guard strengthening, which is done below, and constraints on code not yet built, which are fixed below.
+
+**Corrected: D-090's sentence that the new check means "sqlmap's image can never sit under an agent's shell by a mix-up".** That overstated it. The check compared names (the compose file's `image` and the container's `Config.Image`), so a repointed `lab-attacker:dev` tag, or a hand build from `baseline/` under the wrong tag, would have passed both checks, because `up --no-build` with `pull_policy: never` trusts the tag. The recorded image id is written after the run and compared to nothing.
+
+**Fixed (the audit's findings 1, 5, 6, 7):**
+1. **Sqlmap's presence is now a runtime fact, measured inside the container.** `harness/network_probe.py` reports `sqlmap`: whether the program is on PATH or the package is importable. `evaluate_probe(..., sqlmap_expected=...)` requires the finding to be exactly False on an agent run and True on a baseline run, and a missing or non-boolean finding fails. The lab always passes `sqlmap_expected=self.baseline`. The name checks stay, as the cheap first line. Tests include the retag case (every name says `lab-attacker:dev`, the container has sqlmap) failing the preflight, and the real-Docker preflight now asserts the finding on all four agent variants (False) and all four baseline ones (True).
+2. **The override test sees deletions and every variant.** It compares the agent's and the baseline's attacker key sets in both directions, plus the network, volumes and target service, for A, B, C and D, and no longer needs a running stack.
+3. **The agent-side absence check no longer needs the baseline image.** It is its own test that needs only the agent image, and it also searches the filesystem for any file named for sqlmap; the baseline-side check (sqlmap present at the pinned version) stays gated on the baseline image.
+4. **`Lab.attacker_image` is a property derived from `baseline` on every read,** so a Lab whose flag changes afterwards cannot keep expecting the other image. A unit test pins that, and another pins that `image_digests` records real image ids for a baseline Lab.
+
+**Not done, on purpose:**
+- A check of the live container's `Entrypoint` and `Cmd` (the auditor's optional addition to finding 7): the probe's finding and the existing checks cover what matters, and the check would be brittle against a base-image change.
+- Pinning the base image by digest (finding 4): both images share the same base layers today, and base-image digest pinning is already carried to pre-registration (D-065, D-070). What is fixed here is that the baseline's run record keeps the image id and the base digest (item 4 below).
+- The hash pin in `baseline/requirements.txt` was not confirmed against PyPI by the auditor. The image build is the confirmation: `pip install --require-hashes` succeeded against PyPI's file.
+
+**Constraints on the unbuilt baseline runner, glue script and record (binding when they are built):**
+1. **The stage 1 command line is pinned by a test that denies the outbound-capable and takeover options.** sqlmap's self-update, internet check, search-engine option, DNS-based option, proxy and Tor options, and any option that reads or writes files or runs commands on the target are all opt-in; a unit test on the argument list keeps a later edit from enabling one.
+2. **`baseline_result.json` holds neither the flag nor the admin password.** It records the SHA-256 of the password and a login-succeeded boolean, which is all `events_chain` and the glue script's check need. This **amends D-089 item 7**, which kept both "for the run's own use"; the amendment only removes secrets, so it is in effect until the author says otherwise. If a secret is ever stored, the record needs its own schema with the manifest's redacted-if-and-only-if rule and a test, and it is written only under `runs/`. The manifest's redaction rule does not cover it, and nothing else enforces one.
+3. **Variant D's flag volume is mounted read-only in the baseline container** (the preflight requires the attacker's mount in D, and the override inherits it), so "D equals B" (D-089 item 4) rests on the tools never touching that path. A test pins that the glue script reads only under sqlmap's own output directory, the seed never reaches the baseline container (not by environment, not by argument, not on stdin to anything but the harness's own seeding of the target), and the record never captures `/mnt/shortcut`.
+4. **The baseline record carries the image id of the running attacker container and the base image digest** (`image_digests` already reads the id), because a tag can move.
+5. **The wall-clock cap is enforced inside the container.** Killing the `docker exec` client leaves the process running and still sending requests after the run window, so stage 1 and the glue script use the same in-container timeout pattern as `harness/execution.py`, and the existing order (stop the attacker, then read the target's log) stays the backstop.
+
+**Constrains:** `harness/network_probe.py`, `harness/preflight.py` (`evaluate_probe`), `harness/lab.py` (`attacker_image`), `tests/test_network_probe.py`, `tests/test_preflight.py`, `tests/test_lab.py`, `tests/test_lab_docker.py`, and the unbuilt baseline runner, glue script and record.

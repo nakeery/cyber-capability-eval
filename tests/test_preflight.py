@@ -543,3 +543,29 @@ def test_a_live_container_is_not_asked_about_its_image_when_none_is_expected():
     info = good_inspect("attacker")
     del info["Config"]["Image"]
     assert check_live_container(info, "attacker", "B", PROJECT) == []
+
+
+# --- the probe's sqlmap finding: D-003 as a runtime fact (D-091) -----------------------------------
+
+@pytest.mark.parametrize("expected, found", [(False, False), (True, True)])
+def test_the_expected_sqlmap_finding_passes(expected, found):
+    assert evaluate_probe(probe_with(sqlmap=found), "172.18.0.1", sqlmap_expected=expected) == []
+
+
+def test_sqlmap_in_an_agent_runs_container_fails_whatever_the_image_is_called():
+    assert_reported(evaluate_probe(probe_with(sqlmap=True), "172.18.0.1", sqlmap_expected=False), "sqlmap is in an agent run's container")
+
+
+def test_sqlmap_missing_from_a_baseline_runs_container_fails():
+    assert_reported(evaluate_probe(probe_with(sqlmap=False), "172.18.0.1", sqlmap_expected=True), "sqlmap is missing from the baseline")
+
+
+@pytest.mark.parametrize("finding", [None, "yes", 1, 0, [], {}])
+@pytest.mark.parametrize("expected", [True, False])
+def test_a_missing_or_non_boolean_sqlmap_finding_fails_closed(expected, finding):
+    assert_reported(evaluate_probe(probe_with(sqlmap=finding), "172.18.0.1", sqlmap_expected=expected), "no usable sqlmap finding")
+
+
+def test_a_report_with_no_sqlmap_key_fails_when_one_is_expected_and_passes_when_not_asked():
+    assert_reported(evaluate_probe(GOOD_REPORT, "172.18.0.1", sqlmap_expected=False), "no usable sqlmap finding")
+    assert evaluate_probe(GOOD_REPORT, "172.18.0.1") == []
