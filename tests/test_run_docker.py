@@ -20,7 +20,12 @@ from scorer import score_run_dir
 from telemetry import clock_drift_ms, validate_run_dir
 from test_lab_docker import _docker_ready
 
-pytestmark = pytest.mark.skipif(not _docker_ready(), reason="needs Docker and the built lab images (run.py build)")
+# The skip comes first, so a module that cannot run takes no lock. `lab_lock` (conftest.py, D-087) holds the harness's
+# own lock for the module: a CLI run or sweep during these tests fails fast, and so do these tests during a run.
+pytestmark = [
+    pytest.mark.skipif(not _docker_ready(), reason="needs Docker and the built lab images (run.py build)"),
+    pytest.mark.usefixtures("lab_lock"),
+]
 
 COMMIT = "b" * 40
 SCRIPT = [

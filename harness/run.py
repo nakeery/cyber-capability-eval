@@ -12,7 +12,8 @@ A run directory under runs/<run_id>/ (gitignored: it holds the run's flag and pa
     target_events.jsonl   the target's events, from its own stopped container
     harness_notes.json    everything that has no schema: preflight results, leak-scan timing, sweeps,
                           termination detail, validation problems, development-run flags
-    score.json            the scorer's verdict, if the scoring code is committed and clean
+    score.json            the scorer's verdict, if the scoring code is committed and clean (or, with
+                          --allow-dirty, a development score that names the uncommitted paths, D-086)
 
 `execute_run` takes the lab, the model and the clock as arguments, so tests drive it with fakes.
 """
@@ -20,6 +21,7 @@ A run directory under runs/<run_id>/ (gitignored: it holds the run's flag and pa
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import secrets
@@ -83,7 +85,7 @@ def git_provenance(root: Path = ROOT) -> tuple[str, list[str]]:
         # (" M path"), and a full strip() would eat it and cut a character off the first path.
         return done.stdout.rstrip("\n")
 
-    dirty = [line[3:] for line in git("status", "--porcelain", "--", *HARNESS_CODE).splitlines()]
+    dirty = [line[3:] for line in git("status", "--porcelain", "--untracked-files=all", "--", *HARNESS_CODE).splitlines()]
     return git("rev-parse", "HEAD").strip(), dirty
 
 
@@ -244,6 +246,8 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
     if score_fn is not None:
         try:
             score, score_notes = score_fn(run_dir)
+            # A snapshot from run time. Whether the score was a development score (D-086) is in score.json
+            # only, so a later rescore, which rewrites that file and not this one, can never leave two answers.
             notes["score"] = {"pass": score["pass"], "milestones": score["milestones"], "notes": score_notes}
         except Exception as err:
             notes["score_error"] = f"{type(err).__name__}: {err}"
@@ -368,10 +372,26 @@ def build_local_model(seed: int | None):
     return client, Limits(context_ceiling=pin.context_length - INFERENCE_CONFIG["max_tokens"])
 
 
-def default_score(run_dir: Path) -> tuple[dict, list[str]]:
+def default_score(run_dir: Path, *, allow_dirty: bool = False) -> tuple[dict, list[str]]:
+    """Score a finished run. Uncommitted scoring code refuses the score (D-057), unless `allow_dirty`
+    (the run's own --allow-dirty, D-086): then the score is made and records which scoring paths differed
+    from HEAD (`scorer_dirty_paths`), and is a development score, never study data."""
     sys.path.insert(0, str(ROOT / "scoring"))
-    from scorer import resolve_scorer_commit, score_run_dir
+    from scorer import resolve_scorer_commit, score_run_dir, scorer_provenance
+    if allow_dirty:
+        commit, dirty = scorer_provenance()
+        return score_run_dir(run_dir, commit, scorer_dirty_paths=dirty)
     return score_run_dir(run_dir, resolve_scorer_commit())
+
+
+def _scorer_dirty_paths(run_dir: Path) -> list[str]:
+    """The paths a development score names (D-086), read from score.json as it is NOW; [] for an ordinary
+    score, no score, or one that cannot be read (the validator reports that)."""
+    try:
+        recorded = json.loads((run_dir / "score.json").read_text(encoding="utf-8")).get("scorer_dirty_paths")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(path) for path in recorded] if isinstance(recorded, list) else []
 
 
 def summarize(run_dir: Path) -> str:
@@ -394,6 +414,9 @@ def summarize(run_dir: Path) -> str:
         lines.append(f"  detail: {notes['termination_detail']}")
     if "score" in notes:
         lines.append(f"  score: pass={notes['score']['pass']}, milestones={notes['score']['milestones']}")
+        dirty = _scorer_dirty_paths(run_dir)       # from score.json, the authority (D-086), not the run-time snapshot
+        if dirty:
+            lines.append(f"  DEVELOPMENT SCORE: uncommitted scoring code in {', '.join(dirty)} (not study data)")
     if "score_error" in notes:
         lines.append(f"  not scored: {notes['score_error']}")
     problems = notes.get("validation") or []
@@ -428,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--seed", type=int, default=None, help="local only: this run's sampling seed, recorded (default: random)")
     run.add_argument("--order-seed", type=int, default=0, help="the randomized block order's seed, recorded as run_order_seed")
     run.add_argument("--allow-dirty", action="store_true",
-                     help="run with uncommitted code (a DEVELOPMENT run: recorded in harness_notes.json, never study data)")
+                     help="run with uncommitted code (a DEVELOPMENT run: recorded in harness_notes.json, never study data); also lets the scorer score over uncommitted scoring code, recorded in score.json (D-086)")
     run.add_argument("--no-score", action="store_true")
     args = parser.parse_args(argv)
 
@@ -466,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 variant=args.variant, condition=args.condition, lab=Lab(args.variant, uuid.uuid4().hex),
                 model=model, prompts=load_prompts(), runs_dir=RUNS_DIR, clock=lambda: datetime.now(timezone.utc),
                 harness_commit=commit, dirty_paths=dirty, order_seed=args.order_seed, limits=limits,
-                score_fn=None if args.no_score else default_score)
+                score_fn=None if args.no_score else functools.partial(default_score, allow_dirty=args.allow_dirty))
             print(summarize(run_dir))
             return 0
     except HarnessError as err:
