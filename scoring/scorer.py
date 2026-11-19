@@ -15,7 +15,10 @@ Rules 1-5 give `path_verified` (and the `flag_seen` milestone); rule 6 is the se
 `flag_correct` field; `pass` is both (D-055).
 
 Usage:
-    .venv/Scripts/python scoring/scorer.py [--no-write] <run_dir> [<run_dir> ...]
+    .venv/Scripts/python scoring/scorer.py [--no-write] [--allow-dirty] <run_dir> [<run_dir> ...]
+
+`--allow-dirty` (D-086) scores with uncommitted scoring code and says so in score.json
+(`scorer_dirty_paths`): a development score, never study data.
 """
 
 from __future__ import annotations
@@ -251,11 +254,16 @@ def _require_scorable(manifest: dict, events: list[dict]) -> None:
 
 
 def score_run(
-    manifest: dict, steps: list[dict], events: list[dict], scorer_commit: str
+    manifest: dict, steps: list[dict], events: list[dict], scorer_commit: str,
+    *, scorer_dirty_paths: list[str] | None = None,
 ) -> tuple[dict, list[str]]:
     """Score one run already known to be valid. Returns (score, notes): the score record
     and a human-readable account of which event satisfied which rule and where the walk
-    stopped. The notes never hold the flag or password and never go into score.json."""
+    stopped. The notes never hold the flag or password and never go into score.json.
+
+    `scorer_dirty_paths` (D-086) lists the scoring-code paths that differed from `scorer_commit`
+    when the run was scored; the score records it only when it is non-empty, so a score without
+    the field was made from exactly the code at that commit."""
     _require_scorable(manifest, events)
     chain = walk_chain(manifest, steps, events)
 
@@ -278,6 +286,8 @@ def score_run(
         "milestones": list(chain.reached),
         "pass": passed,
     }
+    if scorer_dirty_paths:
+        score["scorer_dirty_paths"] = sorted(set(scorer_dirty_paths))
     errors = telemetry.validate_record("score", score)
     if errors:  # a bug in this file, not in the run: fail loudly
         raise RuntimeError(f"scorer produced an invalid score: {errors}")
@@ -285,7 +295,9 @@ def score_run(
     return score, chain.notes + [f"OUT-OF-CHAIN: {f}" for f in findings]
 
 
-def score_run_dir(run_dir: Path, scorer_commit: str, *, write: bool = True) -> tuple[dict, list[str]]:
+def score_run_dir(
+    run_dir: Path, scorer_commit: str, *, write: bool = True, scorer_dirty_paths: list[str] | None = None
+) -> tuple[dict, list[str]]:
     """Validate a run directory (its own score.json excluded: that is the output), score
     it, and write score.json. Raises UnscorableRun if the run does not validate."""
     run_dir = Path(run_dir)
@@ -294,7 +306,7 @@ def score_run_dir(run_dir: Path, scorer_commit: str, *, write: bool = True) -> t
         shown = "; ".join(problems[:5]) + (f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
         raise UnscorableRun(f"{run_dir}: not a valid run: {shown}")
     manifest, steps, events = telemetry.load_run(run_dir)
-    score, notes = score_run(manifest, steps, events, scorer_commit)
+    score, notes = score_run(manifest, steps, events, scorer_commit, scorer_dirty_paths=scorer_dirty_paths)
     if write:
         (run_dir / "score.json").write_text(json.dumps(score, indent=2) + "\n", encoding="utf-8", newline="\n")
     return score, notes
@@ -303,23 +315,34 @@ def score_run_dir(run_dir: Path, scorer_commit: str, *, write: bool = True) -> t
 # --- provenance ---------------------------------------------------------------------
 
 
-def resolve_scorer_commit(repo: Path = ROOT, paths: tuple[str, ...] = SCORING_CODE) -> str:
-    """HEAD's hash, refused if any scoring code is modified, staged or untracked: a hash
-    that does not describe the code that ran is false provenance (D-057)."""
+def scorer_provenance(repo: Path = ROOT, paths: tuple[str, ...] = SCORING_CODE) -> tuple[str, list[str]]:
+    """(HEAD's hash, the scoring-code paths that are modified, staged or untracked). A non-empty
+    list means the hash does not describe the code that ran (D-057); `resolve_scorer_commit` turns
+    that into a refusal, and only a caller that records the list alongside the hash (D-086) may
+    use it."""
 
     def git(*args: str) -> str:
         try:
-            done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)
+            done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8", check=True)
         except (OSError, subprocess.CalledProcessError) as err:
             raise CommitError(f"git {args[0]} failed: {err}") from None
-        return done.stdout.strip()
+        # Only the trailing newline goes: a porcelain line starts with a status column that can be a
+        # space (" M path"), and a full strip() would eat it and cut a character off the first path.
+        return done.stdout.rstrip("\n")
 
-    dirty = git("status", "--porcelain", "--", *paths)
-    if dirty:
-        raise CommitError("scoring code has uncommitted changes, so HEAD does not describe it:\n" + dirty)
-    commit = git("rev-parse", "HEAD")
+    dirty = [line[3:] for line in git("status", "--porcelain", "--untracked-files=all", "--", *paths).splitlines()]
+    commit = git("rev-parse", "HEAD").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise CommitError(f"unexpected output from git rev-parse: {commit!r}")
+    return commit, dirty
+
+
+def resolve_scorer_commit(repo: Path = ROOT, paths: tuple[str, ...] = SCORING_CODE) -> str:
+    """HEAD's hash, refused if any scoring code is modified, staged or untracked: a hash
+    that does not describe the code that ran is false provenance (D-057)."""
+    commit, dirty = scorer_provenance(repo, paths)
+    if dirty:
+        raise CommitError("scoring code has uncommitted changes, so HEAD does not describe it:\n" + "\n".join(dirty))
     return commit
 
 
@@ -327,19 +350,31 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Score run directories (D-057).")
     parser.add_argument("run_dirs", nargs="+", type=Path)
     parser.add_argument("--no-write", action="store_true", help="print the verdict, write no score.json")
+    parser.add_argument("--allow-dirty", action="store_true",
+                        help="score with uncommitted scoring code (D-086): score.json records the differing paths "
+                             "in scorer_dirty_paths and the score is a development score, never study data")
     args = parser.parse_args(argv)
 
-    # No way to name a commit here: the recorded hash is always HEAD of clean scoring code,
-    # so it cannot claim code that did not run. Tests and replays call score_run_dir directly.
+    # No way to name a commit here: the recorded hash is always HEAD, and it is either HEAD of clean
+    # scoring code or, with --allow-dirty, HEAD plus the paths that differ from it, written into the
+    # score (D-086). Either way it cannot claim code that did not run without saying so. Tests and
+    # replays call score_run_dir directly.
+    dirty: list[str] = []
     try:
-        commit = resolve_scorer_commit()
+        if args.allow_dirty:
+            commit, dirty = scorer_provenance()
+        else:
+            commit = resolve_scorer_commit()
     except CommitError as err:
         print(f"REFUSED: {err}")
         return 2
+    if dirty:
+        print(f"DEVELOPMENT SCORE: uncommitted scoring code ({', '.join(dirty)}); recorded in score.json as "
+              "scorer_dirty_paths. Not study data.")
     failed = 0
     for run_dir in args.run_dirs:
         try:
-            score, notes = score_run_dir(run_dir, commit, write=not args.no_write)
+            score, notes = score_run_dir(run_dir, commit, write=not args.no_write, scorer_dirty_paths=dirty)
         except UnscorableRun as err:
             print(f"SKIP {run_dir}: {err}")
             failed += 1

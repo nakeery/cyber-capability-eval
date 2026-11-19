@@ -20,7 +20,7 @@ from harness_fakes import BEDROCK_INFERENCE, FakeClock, FakeExecutor, FakeModel,
 from lab import HarnessError
 from model import ModelError
 from prompt_set import load_prompts
-from run import (UNKNOWN_DIGEST, find_orphans, git_provenance, new_seed, run_lock, summarize)
+from run import (UNKNOWN_DIGEST, default_score, find_orphans, git_provenance, new_seed, run_lock, summarize)
 from run import execute_run as _execute_run
 
 # Every FakeModel in this file is labeled backend "bedrock", and the production temperature (D-084) is above what a
@@ -700,3 +700,71 @@ def test_weights_that_do_not_match_the_pin_end_the_run_before_any_docker_work(tm
         FakeLocalModel.weights_path = None
     assert manifest["termination_reason"] == "harness_error" and "pinned SHA-256" in manifest["harness_error"]
     assert lab.calls == ["down"] and model.requests == []
+
+
+# --- scoring a development run over uncommitted scoring code (D-086) -----------------------------
+
+def test_default_score_refuses_uncommitted_scoring_code_unless_the_run_allows_dirty(tmp_path, monkeypatch):
+    import scorer
+
+    calls = []
+    monkeypatch.setattr(scorer, "scorer_provenance", lambda: ("d" * 40, ["scoring/scorer.py"]))
+    monkeypatch.setattr(scorer, "resolve_scorer_commit",
+                        lambda: (_ for _ in ()).throw(scorer.CommitError("scoring code has uncommitted changes")))
+    monkeypatch.setattr(scorer, "score_run_dir", lambda run_dir, commit, **kw: calls.append((commit, kw)) or ({}, []))
+    with pytest.raises(scorer.CommitError):
+        default_score(tmp_path)                                      # strict by default
+    assert calls == []
+    default_score(tmp_path, allow_dirty=True)
+    assert calls == [("d" * 40, {"scorer_dirty_paths": ["scoring/scorer.py"]})]
+
+
+def test_the_summary_reads_the_development_marker_from_score_json_never_from_the_notes(tmp_path):
+    # score.json is the only authority (D-086). The notes hold a run-time snapshot with no marker, so a rescore,
+    # which rewrites score.json and not the notes, can never leave the summary saying the old thing.
+    def score_fn(run_dir):
+        (run_dir / "score.json").write_text(json.dumps({"scorer_dirty_paths": ["scoring/scorer.py"]}), encoding="utf-8")
+        return {"pass": False, "milestones": []}, []
+
+    run_dir, _, notes, *_ = make(tmp_path, [text_reply()], score_fn=score_fn)
+    assert "scorer_dirty_paths" not in notes["score"]
+    assert "DEVELOPMENT SCORE" in summarize(run_dir) and "scoring/scorer.py" in summarize(run_dir)
+    (run_dir / "score.json").write_text(json.dumps({"pass": False}), encoding="utf-8")     # a clean rescore
+    assert "DEVELOPMENT SCORE" not in summarize(run_dir)
+
+
+def test_an_unreadable_score_json_never_breaks_the_summary(tmp_path):
+    run_dir, *_ = make(tmp_path, [text_reply()], score_fn=lambda _d: ({"pass": False, "milestones": []}, []))
+    (run_dir / "score.json").write_text("{not json", encoding="utf-8")
+    assert "DEVELOPMENT SCORE" not in summarize(run_dir)
+
+
+# --- the study-data guard (D-086) ----------------------------------------------------------------
+
+def test_study_validation_rejects_a_development_score_and_a_clean_rescore_clears_it(tmp_path):
+    import scorer
+
+    run_dir, *_ = make(tmp_path, [text_reply()])
+    scorer.score_run_dir(run_dir, "d" * 40, scorer_dirty_paths=["scoring/scorer.py"])
+    assert validate_run_dir(run_dir) == []                              # a valid record, as every development score is
+    problems = validate_run_dir(run_dir, study=True)
+    assert len(problems) == 1 and "development score" in problems[0] and "scoring/scorer.py" in problems[0]
+    scorer.score_run_dir(run_dir, "d" * 40)                             # replaced by an ordinary score
+    assert validate_run_dir(run_dir, study=True) == []
+
+
+def test_study_validation_rejects_a_run_made_with_uncommitted_code_even_when_its_score_is_clean(tmp_path):
+    import scorer
+
+    run_dir, *_ = make(tmp_path, [text_reply()], dirty=("harness/agent.py",))
+    scorer.score_run_dir(run_dir, "d" * 40)
+    assert validate_run_dir(run_dir) == []
+    problems = validate_run_dir(run_dir, study=True)
+    assert len(problems) == 1 and "development run" in problems[0] and "harness/agent.py" in problems[0]
+
+
+def test_study_validation_of_an_ordinary_run_is_empty_and_an_unreadable_notes_file_is_not_trusted(tmp_path):
+    run_dir, *_ = make(tmp_path, [text_reply()])
+    assert validate_run_dir(run_dir, study=True) == []
+    (run_dir / "harness_notes.json").write_text("{not json", encoding="utf-8")
+    assert any("harness_notes.json" in problem for problem in validate_run_dir(run_dir, study=True))

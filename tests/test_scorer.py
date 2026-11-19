@@ -809,3 +809,86 @@ def test_the_scorer_reproduces_every_filled_skeleton(run_dir):
     expected = json.loads((run_dir / "score.json").read_text(encoding="utf-8"))
     score, _ = scorer.score_run_dir(run_dir, expected["scorer_commit"], write=False)
     assert score == expected
+
+
+# --- scoring over uncommitted code, recorded as such (D-086) -------------------------------------
+
+
+def test_provenance_lists_the_differing_scoring_paths_with_the_first_one_intact(repo):
+    # The first status line starts with a space (" M path"); a full strip() would cut a character off it.
+    (repo / "scoring" / "scorer.py").write_text("x = 2\n", encoding="utf-8")
+    (repo / "scoring" / "extra.py").write_text("x = 3\n", encoding="utf-8")
+    (repo / "unrelated.txt").write_text("b\n", encoding="utf-8")
+    commit, dirty = scorer.scorer_provenance(repo, ("scoring",))
+    assert commit == _git(repo, "rev-parse", "HEAD")
+    assert sorted(dirty) == ["scoring/extra.py", "scoring/scorer.py"]
+
+
+def test_provenance_of_a_clean_tree_has_no_differing_paths(repo):
+    assert scorer.scorer_provenance(repo, ("scoring",)) == (_git(repo, "rev-parse", "HEAD"), [])
+
+
+def test_the_strict_resolver_still_refuses_and_names_the_paths(repo):
+    (repo / "scoring" / "scorer.py").write_text("x = 2\n", encoding="utf-8")
+    with pytest.raises(scorer.CommitError, match=r"uncommitted[\s\S]*scoring/scorer\.py"):
+        scorer.resolve_scorer_commit(repo, ("scoring",))
+
+
+def test_a_development_score_records_the_differing_paths_sorted_and_validates(build):
+    score, _ = scorer.score_run(*genuine(build()), COMMIT, scorer_dirty_paths=["scoring/z.py", "schemas/a.json", "scoring/z.py"])
+    assert score["scorer_dirty_paths"] == ["schemas/a.json", "scoring/z.py"]
+    assert score["scorer_commit"] == COMMIT and telemetry.validate_record("score", score) == []
+
+
+@pytest.mark.parametrize("paths", [None, []])
+def test_a_score_from_committed_code_has_no_dirty_marker(build, paths):
+    score, _ = scorer.score_run(*genuine(build()), COMMIT, scorer_dirty_paths=paths)
+    assert "scorer_dirty_paths" not in score
+
+
+def test_the_score_schema_rejects_an_empty_or_malformed_dirty_marker(build):
+    score, _ = scorer.score_run(*genuine(build()), COMMIT)
+    for bad in ([], "scoring/x.py", [""], ["a", "a"], [3]):
+        assert telemetry.validate_record("score", {**score, "scorer_dirty_paths": bad}) != [], bad
+
+
+def test_the_cli_allow_dirty_scores_and_records_the_marker(build, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(scorer, "scorer_provenance", lambda: (COMMIT, ["scoring/scorer.py"]))
+    d = write_run(tmp_path, genuine(build()))
+    assert scorer.main([str(d), "--allow-dirty"]) == 0
+    out = capsys.readouterr().out
+    assert "DEVELOPMENT SCORE" in out and "scoring/scorer.py" in out and "PASS" in out
+    written = json.loads((d / "score.json").read_text(encoding="utf-8"))
+    assert written["scorer_commit"] == COMMIT and written["scorer_dirty_paths"] == ["scoring/scorer.py"]
+    assert telemetry.validate_record("score", written) == []
+
+
+def test_the_cli_allow_dirty_on_clean_code_writes_an_ordinary_score(build, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(scorer, "scorer_provenance", lambda: (COMMIT, []))
+    d = write_run(tmp_path, genuine(build()))
+    assert scorer.main([str(d), "--allow-dirty"]) == 0
+    assert "DEVELOPMENT SCORE" not in capsys.readouterr().out
+    assert "scorer_dirty_paths" not in json.loads((d / "score.json").read_text(encoding="utf-8"))
+
+
+def test_without_allow_dirty_the_cli_still_refuses_dirty_scoring_code(build, tmp_path, capsys, monkeypatch):
+    # The lenient path exists only behind the flag: even where the lenient function would report dirty paths,
+    # the default path goes through the strict resolver and writes nothing.
+    monkeypatch.setattr(scorer, "scorer_provenance", lambda: (COMMIT, ["scoring/scorer.py"]))
+    def strict():
+        raise scorer.CommitError("scoring code has uncommitted changes")
+    monkeypatch.setattr(scorer, "resolve_scorer_commit", strict)
+    d = write_run(tmp_path, genuine(build()))
+    assert scorer.main([str(d)]) == 2
+    assert "REFUSED" in capsys.readouterr().out and not (d / "score.json").exists()
+
+
+def test_a_user_config_that_hides_untracked_files_cannot_hide_a_new_scoring_file(repo):
+    # `status.showUntrackedFiles=no` would make a plain `git status` report a new scoring file as nothing at all,
+    # and an untracked directory is listed by its files, not collapsed into one `dir/` entry.
+    _git(repo, "config", "status.showUntrackedFiles", "no")
+    (repo / "scoring" / "newdir").mkdir()
+    (repo / "scoring" / "newdir" / "rule.py").write_text("x = 4\n", encoding="utf-8")
+    assert scorer.scorer_provenance(repo, ("scoring",))[1] == ["scoring/newdir/rule.py"]
+    with pytest.raises(scorer.CommitError, match="uncommitted"):
+        scorer.resolve_scorer_commit(repo, ("scoring",))

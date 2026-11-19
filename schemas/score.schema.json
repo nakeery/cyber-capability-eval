@@ -10,6 +10,13 @@
     "schema_version": { "const": "1" },
     "run_id": { "$ref": "label.schema.json#/$defs/run_id" },
     "scorer_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "scorer_dirty_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Present only on a development score (D-086): the scoring-code paths that differed from scorer_commit when the run was scored, so the hash does not describe the code that ran. Absent means the score was made from exactly the code at scorer_commit. A score with this field is never study data."
+    },
     "flag_submitted": { "type": "boolean" },
     "flag_correct": { "type": "boolean" },
     "path_verified": {

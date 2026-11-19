@@ -371,11 +371,17 @@ def load_run(run_dir: Path) -> tuple[dict, list[dict], list[dict]]:
     )
 
 
-def validate_run_dir(run_dir: Path, *, include_score: bool = True) -> list[str]:
+def validate_run_dir(run_dir: Path, *, include_score: bool = True, study: bool = False) -> list[str]:
     """Validate every record in one run directory, then the cross-record rules.
 
     include_score=False skips score.json, for the scorer itself (D-057): a stale score
     from an earlier scorer version is its output to replace, not an input to check.
+
+    study=True (D-086) also reports a DEVELOPMENT run as a problem: a score written over uncommitted
+    scoring code (`scorer_dirty_paths` in score.json, the only authority for that), or a run made with
+    uncommitted code (`dirty_paths` in harness_notes.json). Both are valid records, so a plain
+    validation passes them; whatever collects study data asks for study=True and takes only runs that
+    return an empty list.
     """
     problems: list[str] = []
     try:
@@ -404,6 +410,22 @@ def validate_run_dir(run_dir: Path, *, include_score: bool = True) -> list[str]:
         problems += validate_record(kind, record)
         if kind == "score":
             score = record
+
+    if study:
+        marked = score.get("scorer_dirty_paths") if isinstance(score, dict) else None
+        if marked:      # whatever its shape: an invalid marker is already a problem above, and is no clean score either
+            shown = ", ".join(map(str, marked)) if isinstance(marked, list) else str(marked)
+            problems.append(f"score.json: a development score over uncommitted scoring code ({shown}), never study data (D-086)")
+        notes_path = run_dir / "harness_notes.json"
+        if notes_path.exists():
+            try:
+                notes = _read_json(notes_path)
+            except (OSError, ValueError) as err:
+                problems.append(f"harness_notes.json: unreadable, so the run's provenance is unknown ({err})")
+            else:
+                if isinstance(notes, dict) and notes.get("dirty_paths"):
+                    problems.append("harness_notes.json: a development run made with uncommitted code "
+                                    f"({', '.join(notes['dirty_paths'])}), never study data (D-086)")
 
     if not problems:  # cross-record rules assume each record is individually valid
         problems += check_consistency(manifest, steps, events, score)
