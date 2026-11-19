@@ -313,6 +313,26 @@ def test_a_failed_call_is_tagged_with_its_kind(code, kind):
     assert err.value.kind == kind
 
 
+def test_bedrock_refuses_a_temperature_above_its_range_before_calling_the_service():
+    from model import BEDROCK_MAX_TEMPERATURE, BedrockClient, ModelError
+
+    class NeverCalled:
+        class meta:
+            class events:
+                register = staticmethod(lambda *a, **k: None)
+
+        def converse(self, **kwargs):
+            raise AssertionError("a request that cannot be valid must not reach the service")
+
+    client = BedrockClient(client=NeverCalled(), model_id="m", region="us-east-1")
+    hot = {"temperature": BEDROCK_MAX_TEMPERATURE + 0.2, "top_p": 0.9, "max_tokens": 1024}
+    with pytest.raises(ModelError) as err:
+        client.converse(system="s", messages=[], tool_config={"tools": []}, inference=hot)
+    # The harness's own configuration problem: the kind Converse's ValidationException gets, never an outage.
+    assert (err.value.kind, err.value.retries) == ("request_rejected", 0)
+    assert "D-084" in str(err.value)
+
+
 def test_a_network_fault_is_a_service_failure():
     from botocore.exceptions import EndpointConnectionError
     from model import classify_error

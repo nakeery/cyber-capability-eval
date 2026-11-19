@@ -9,9 +9,9 @@ import dataclasses
 import json
 
 import pytest
-from agent import Limits, classify_turn
-from harness_fakes import (FLAG, PASSWORD, RUN_ID, call_reply, command, outcome, run_loop, submit,
-                           text_reply)
+from agent import Limits, LoopResult, classify_turn, run_agent
+from harness_fakes import (FLAG, PASSWORD, RUN_ID, SECRETS, FakeClock, FakeExecutor, FakeModel, call_reply, command,
+                           outcome, run_loop, submit, text_reply)
 from model import ModelError, ModelReply
 from prompt_set import load_prompts
 from telemetry import validate_record
@@ -271,6 +271,17 @@ def test_exhausting_the_text_only_limit_ends_the_run_as_agent_stopped():
     assert_all_valid(steps)
 
 
+def test_the_production_limit_of_four_means_three_nudges_and_the_fourth_text_only_turn_ends_the_run():
+    # D-084: the turn that REACHES the limit ends the run, so a limit of N allows at most N - 1 nudges in a row.
+    from agent import TEXT_ONLY_LIMIT
+    script = [text_reply(w) for w in "abcde"]
+    result, model, _, steps = run_loop(script, limits=Limits(text_only_limit=TEXT_ONLY_LIMIT))
+    assert result.termination_reason == "agent_stopped"
+    assert len(steps) == 4 and len(model.requests) == 4           # the fifth reply is never asked for
+    assert [s.get("nudged", False) for s in steps] == [True, True, True, False]
+    assert_all_valid(steps)
+
+
 def test_step_cap_preempts_a_nudge_the_limit_would_otherwise_allow():
     # Step 2 is text-only and the limit (4) has room left, but the cap (2) is reached first: never nudged,
     # and the record never claims a nudge that was preempted (the thing the reordering in agent.py guards).
@@ -306,15 +317,36 @@ def test_step_cap_ends_the_run_after_exactly_that_many_steps():
     assert [s["step"] for s in steps] == list(range(1, 31))
 
 
-def test_the_production_limits_are_d062s():
+def test_the_production_limits_are_d062s_and_the_sampling_is_d084s():
     from agent import CONTEXT_CEILING, INFERENCE_CONFIG, RESULT_ALLOWANCE, STEP_CAP
     assert (STEP_CAP, CONTEXT_CEILING, RESULT_ALLOWANCE) == (30, 100_000, 2731)
-    assert (INFERENCE_CONFIG["top_p"], INFERENCE_CONFIG["max_tokens"]) == (0.9, 1024)
+    # D-084: D-062's temperature raised to 1.2; top_p and the output budget stay as D-062 set them.
+    assert INFERENCE_CONFIG == {"temperature": 1.2, "top_p": 0.9, "max_tokens": 1024}
 
 
 def test_a_failed_health_check_after_a_command_ends_the_run_as_target_down():
     result, model, _, steps = run_loop([command("ls"), command("ls")], health=lambda: False)
     assert (result.termination_reason, len(steps), len(model.requests)) == ("target_down", 1, 1)
+
+
+def test_a_health_check_that_raises_still_leaves_the_command_step_on_record():
+    # health() raises HarnessError when the attacker container is dead. The command that was just run may be what
+    # killed it (D-075 R1), so its step is recorded before the exception leaves, in both places a caller reads.
+    class Dead(Exception):
+        pass
+
+    def dead():
+        raise Dead("the attacker container is not running")
+
+    recorded = []
+    with pytest.raises(Dead):
+        clock = FakeClock()
+        run_agent(model=FakeModel([command("ls"), text_reply()], clock), executor=FakeExecutor(clock),
+                  prompts=PROMPTS, condition="no_hint", run_id=RUN_ID, secrets=SECRETS, clock=clock, health=dead,
+                  on_step=recorded.append, result=(partial := LoopResult("harness_error", 0, started_at=clock())))
+    assert [s["tool_name"] for s in recorded] == ["run_command"]
+    assert partial.steps == recorded          # the caller's own result holds it too, so the run's record can be finished
+    assert_all_valid(recorded)
 
 
 def test_health_is_not_probed_for_a_turn_that_ran_nothing():

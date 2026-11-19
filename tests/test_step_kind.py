@@ -9,7 +9,7 @@ import pytest
 from agent import Limits, classify_turn
 from harness_fakes import command, run_loop, text_reply
 from model import ModelReply
-from step_kind import ends_text_only_after_a_command, models_own_words, step_kind
+from step_kind import ends_text_only_after_a_command, hit_the_nudge_limit, models_own_words, step_kind
 
 STOPS = ["tool_use", "end_turn", "max_tokens", "stop_sequence", "guardrail_intervened", "content_filtered",
          "malformed_model_output", "malformed_tool_use", "model_context_window_exceeded", "some_future_reason"]
@@ -150,3 +150,34 @@ def test_a_command_is_counted_by_both_counts():
 def test_no_steps_is_not_counted():
     assert not ends_text_only_after_a_command([], "agent_stopped")
     assert not ends_text_only_after_a_command([], "agent_stopped", attempts=True)
+
+
+# --- hit_the_nudge_limit (D-083, D-084) ------------------------------------------------
+
+def test_a_run_that_stayed_text_only_through_every_nudge_hit_the_limit():
+    result, _, _, steps = run_loop([command("ls"), text_reply("a"), text_reply("b"), text_reply("c")],
+                                   limits=Limits(text_only_limit=3))
+    assert result.termination_reason == "agent_stopped"
+    assert hit_the_nudge_limit(steps, result.termination_reason)
+    assert ends_text_only_after_a_command(steps, result.termination_reason)       # the wider count includes it
+
+
+def test_ending_on_the_first_text_only_turn_is_not_the_nudge_limit():
+    # limit 1 is D-063's old rule: nothing was ever nudged, so no limit was "reached".
+    result, _, _, steps = run_loop([command("ls"), text_reply("Done.")])
+    assert ends_text_only_after_a_command(steps, result.termination_reason)
+    assert not hit_the_nudge_limit(steps, result.termination_reason)
+
+
+def test_an_empty_reply_after_a_nudge_is_structural_and_not_the_limit():
+    result, _, _, steps = run_loop([command("ls"), text_reply("a"), text_reply("", stop="end_turn")],
+                                   limits=Limits(text_only_limit=4))
+    assert result.termination_reason == "agent_stopped" and steps[-2]["nudged"] is True
+    assert not hit_the_nudge_limit(steps, result.termination_reason)
+
+
+def test_a_platform_block_after_a_nudge_and_other_terminations_are_not_the_limit():
+    result, _, _, steps = run_loop([command("ls"), text_reply("a"), text_reply("", stop="content_filtered")],
+                                   limits=Limits(text_only_limit=4))
+    assert not hit_the_nudge_limit(steps, result.termination_reason)
+    assert not hit_the_nudge_limit(steps, "step_cap") and not hit_the_nudge_limit([], "agent_stopped")

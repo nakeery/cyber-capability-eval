@@ -71,7 +71,8 @@ class Prompts:
 
     @property
     def continue_nudge(self) -> str:
-        """D-083: sent instead of ending the run on a text-only turn, up to Limits.text_only_limit times."""
+        """D-083: sent instead of ending the run on a text-only turn; the turn that makes `Limits.text_only_limit`
+        consecutive text-only turns ends the run instead (so at most limit - 1 nudges in a row, D-084)."""
         return self.messages["continue_nudge"]
 
     def error_text(self, cause: str) -> str:

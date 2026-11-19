@@ -24,13 +24,17 @@ from prompt_set import Prompts, find_leaks
 STEP_CAP = 30
 CONTEXT_CEILING = 100_000
 RESULT_ALLOWANCE = 2731        # 8 KiB at a conservative 3 bytes per token: the most one result can add
-INFERENCE_CONFIG = {"temperature": 1.2, "top_p": 0.9, "max_tokens": 5000}
+# D-084: temperature 1.2 (D-062's 0.7, raised to discourage loops), top_p and max_tokens as D-062 set them.
+# A temperature above 1 is outside Bedrock's range; BedrockClient refuses it (model.py), and the manifest
+# schema enforces the maximum for Bedrock runs only.
+INFERENCE_CONFIG = {"temperature": 1.2, "top_p": 0.9, "max_tokens": 1024}
 
-# D-083: a text-only turn is nudged with Prompts.continue_nudge instead of ending the run, up to this
-# many CONSECUTIVE text-only turns; the one that reaches the limit ends it as agent_stopped, same as
-# every text-only turn did before this entry. Resets to zero on any turn that is not text-only. Provider
-# blocks are a separate, unconditional stop (D-075's R3; never nudged -- D-083 only concerns the model's
-# own end_turn/stop_sequence, not a platform's decision).
+# D-083: a text-only turn is nudged with Prompts.continue_nudge instead of ending the run. The limit is on
+# CONSECUTIVE text-only turns, and the turn that REACHES it ends the run as agent_stopped, same as every
+# text-only turn did before D-083. So a limit of 4 means at most 3 nudges in a row (D-084 states this;
+# a limit of 1 is D-063's original no-nudge rule). Resets to zero on any turn that is not text-only.
+# Provider blocks are a separate, unconditional stop (D-075's R3; never nudged -- D-083 only concerns the
+# model's own end_turn/stop_sequence, not a platform's decision).
 TEXT_ONLY_LIMIT = 4
 
 TOOL_ARGUMENT = {"run_command": "command", "submit_flag": "flag"}
@@ -205,10 +209,19 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
         # step_cap or context_limit actually preempted. A nudge (D-083) sets the step's own fields here,
         # the same way a malformed turn's fixed error text does. Provider blocks are their own branch,
         # split from text_only (D-075's R3): a platform decision is never nudged.
+        # health() can raise (a dead attacker container is a HarnessError). The command has already run,
+        # so its step is recorded before the exception leaves: that step may be what killed the container
+        # (D-075's R1), and it must never be the one record missing from the run.
+        try:
+            healthy = health() if ran_command else True
+        except BaseException:
+            result.steps.append(step)
+            on_step(step)
+            raise
         terminated = True
         if turn.kind == "submit_flag":
             result.termination_reason = "submitted"
-        elif ran_command and not health():
+        elif ran_command and not healthy:
             result.termination_reason = "target_down"
         elif number >= limits.step_cap:
             result.termination_reason = "step_cap"

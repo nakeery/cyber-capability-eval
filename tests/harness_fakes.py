@@ -20,6 +20,9 @@ FLAG = "FLAG-AbCdEfGhIjKlMnOpQrStUvWx"
 PASSWORD = "pw-AbCdEfGhIjKlMnOpQrStUvWx1234"
 RUN_ID = "0123456789abcdef0123456789abcdef"
 SECRETS = {"flag": FLAG, "admin_password": PASSWORD}
+# FakeModel is labeled `backend = "bedrock"`, and the production temperature (D-084) is above Bedrock's range, which the
+# manifest schema enforces for that backend. A test that validates a fake-bedrock run passes this instead (D-062's old config).
+BEDROCK_INFERENCE = {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
 
 
 class FakeClock:

@@ -7,6 +7,7 @@ directory it leaves validates.
 """
 
 import dataclasses
+import functools
 import json
 import re
 import shutil
@@ -15,11 +16,17 @@ from datetime import datetime, timezone
 
 import pytest
 from agent import INFERENCE_CONFIG, Limits
-from harness_fakes import FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
+from harness_fakes import BEDROCK_INFERENCE, FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
 from lab import HarnessError
 from model import ModelError
 from prompt_set import load_prompts
-from run import (UNKNOWN_DIGEST, execute_run, find_orphans, git_provenance, new_seed, run_lock, summarize)
+from run import (UNKNOWN_DIGEST, find_orphans, git_provenance, new_seed, run_lock, summarize)
+from run import execute_run as _execute_run
+
+# Every FakeModel in this file is labeled backend "bedrock", and the production temperature (D-084) is above what a
+# Bedrock manifest may record (schemas/run_manifest.schema.json). So a run of one records a Bedrock-legal config;
+# the local-model helper below passes the production INFERENCE_CONFIG explicitly.
+execute_run = functools.partial(_execute_run, inference=BEDROCK_INFERENCE)
 from telemetry import validate_record, validate_run_dir
 from variant_registry import VARIANTS
 
@@ -102,7 +109,7 @@ def make(tmp_path, script, *, variant="B", condition="no_hint", lab_kwargs=None,
         executor_factory=lambda _lab: executor or FakeExecutor(clock, results, exec_seconds),
         # D-083's production default is 4; most of these tests use a bare text_reply() just to end the
         # script cleanly, written before the nudge existed. A test actually about it passes its own.
-        limits=limits if limits is not None else Limits(text_only_limit=1))
+        limits=limits if limits is not None else Limits(text_only_limit=1), inference=BEDROCK_INFERENCE)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     steps = [json.loads(line) for line in (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines() if line]
@@ -123,16 +130,39 @@ def test_a_run_leaves_a_directory_that_validates(tmp_path):
     assert sorted(p.name for p in run_dir.iterdir()) == ["harness_notes.json", "manifest.json", "steps.jsonl", "target_events.jsonl"]
 
 
+def test_the_manifest_schema_caps_temperature_for_a_bedrock_run_only(tmp_path):
+    # D-084: the production temperature (1.2) is above Bedrock's 0-1 range. A Bedrock manifest (backend bedrock, or no
+    # backend at all, as before D-060) must not claim it; a local run's manifest may.
+    _, manifest, *_ = make(tmp_path, [text_reply()])
+    hot = {**manifest, "inference_config": {**manifest["inference_config"], "temperature": 1.2}}
+    assert any("temperature" in problem for problem in validate_record("manifest", hot))
+    no_backend = {key: value for key, value in hot.items() if key != "backend"}
+    assert any("temperature" in problem for problem in validate_record("manifest", no_backend))
+    cold = {**manifest, "inference_config": {**manifest["inference_config"], "temperature": -0.1}}
+    assert any("temperature" in problem for problem in validate_record("manifest", cold))
+
+
+def test_a_local_run_records_the_production_sampling_and_validates(tmp_path):
+    _, manifest, _, _, model = run_local(tmp_path, [text_reply()])
+    assert manifest["backend"] == "local" and manifest["inference_config"] == INFERENCE_CONFIG
+    assert model.requests[0]["inference"] == manifest["inference_config"]      # recorded = sent
+    assert manifest["inference_config"]["temperature"] > 1
+    assert validate_record("manifest", manifest) == []
+
+
 def test_the_manifest_records_what_ran(tmp_path):
     seed = new_seed("B")
-    run_dir, manifest, *_ = make(tmp_path, [text_reply()], condition="hint", seed=seed)
+    run_dir, manifest, notes, steps, lab, model = make(tmp_path, [text_reply()], condition="hint", seed=seed)
     assert validate_record("manifest", manifest) == []
+    # What the manifest says the sampling was is what the model was sent: both come from the one value execute_run
+    # was given, and nothing else would notice if they drifted apart.
+    assert model.requests[0]["inference"] == manifest["inference_config"]
     assert manifest["variant_config"] == VARIANTS["B"]["variant_config"] and manifest["variant"] == "B"
     assert (manifest["flag"], manifest["admin_password"]) == (seed["flag"], seed["admin_password"])
     assert manifest["system_prompt_hash"] == PROMPTS.system_prompt_hash("hint")
     assert manifest["hint_text"] == PROMPTS.hint and manifest["condition"] == "hint"
     assert (manifest["backend"], manifest["region"], manifest["model_id"]) == ("bedrock", "us-east-1", "fake-model")
-    assert manifest["inference_config"] == INFERENCE_CONFIG
+    assert manifest["inference_config"] == BEDROCK_INFERENCE
     assert (manifest["step_cap"], manifest["harness_commit"], manifest["run_order_seed"]) == (30, COMMIT, 7)
     assert manifest["image_digests"] == {"attacker": "sha256:" + "a" * 64, "target": "sha256:" + "c" * 64}
     assert manifest["docker_version"] == "29.9.2" and manifest["target_health_start"] == "healthy"
@@ -598,7 +628,8 @@ def run_local(tmp_path, script, *, seed=None, limits=None, **model_kwargs):
     model = FakeLocalModel(script, clock, lab=lab, **model_kwargs)
     run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=model, prompts=PROMPTS, runs_dir=tmp_path, clock=clock,
                           harness_commit=COMMIT, seed=seed or new_seed("B"), executor_factory=lambda _l: FakeExecutor(clock),
-                          limits=limits if limits is not None else Limits(text_only_limit=1))
+                          limits=limits if limits is not None else Limits(text_only_limit=1),
+                          inference=INFERENCE_CONFIG)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     return run_dir, manifest, notes, lab, model
