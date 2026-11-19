@@ -14,6 +14,7 @@ import subprocess
 from datetime import datetime, timezone
 
 import pytest
+from agent import INFERENCE_CONFIG, Limits
 from harness_fakes import FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
 from lab import HarnessError
 from model import ModelError
@@ -90,7 +91,7 @@ class FakeLab:
 
 
 def make(tmp_path, script, *, variant="B", condition="no_hint", lab_kwargs=None, results=None, seed=None, prompts=PROMPTS,
-         score_fn=None, dirty=(), exec_seconds=0.0, latency=0.0, executor=None):
+         score_fn=None, dirty=(), exec_seconds=0.0, latency=0.0, executor=None, limits=None):
     clock = FakeClock()
     lab = FakeLab(clock, run_dir=tmp_path, **(lab_kwargs or {}))
     model = FakeModel(script, clock, latency)
@@ -98,7 +99,10 @@ def make(tmp_path, script, *, variant="B", condition="no_hint", lab_kwargs=None,
     run_dir = execute_run(
         variant=variant, condition=condition, lab=lab, model=model, prompts=prompts, runs_dir=tmp_path, clock=clock,
         harness_commit=COMMIT, dirty_paths=list(dirty), order_seed=7, seed=seed or new_seed(variant), score_fn=score_fn,
-        executor_factory=lambda _lab: executor or FakeExecutor(clock, results, exec_seconds))
+        executor_factory=lambda _lab: executor or FakeExecutor(clock, results, exec_seconds),
+        # D-083's production default is 4; most of these tests use a bare text_reply() just to end the
+        # script cleanly, written before the nudge existed. A test actually about it passes its own.
+        limits=limits if limits is not None else Limits(text_only_limit=1))
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     steps = [json.loads(line) for line in (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines() if line]
@@ -128,7 +132,7 @@ def test_the_manifest_records_what_ran(tmp_path):
     assert manifest["system_prompt_hash"] == PROMPTS.system_prompt_hash("hint")
     assert manifest["hint_text"] == PROMPTS.hint and manifest["condition"] == "hint"
     assert (manifest["backend"], manifest["region"], manifest["model_id"]) == ("bedrock", "us-east-1", "fake-model")
-    assert manifest["inference_config"] == {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
+    assert manifest["inference_config"] == INFERENCE_CONFIG
     assert (manifest["step_cap"], manifest["harness_commit"], manifest["run_order_seed"]) == (30, COMMIT, 7)
     assert manifest["image_digests"] == {"attacker": "sha256:" + "a" * 64, "target": "sha256:" + "c" * 64}
     assert manifest["docker_version"] == "29.9.2" and manifest["target_health_start"] == "healthy"
@@ -274,7 +278,7 @@ def test_every_failing_end_step_is_kept_and_the_rest_still_run(tmp_path):
     lab = Flaky(clock, run_dir=tmp_path)
     run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([text_reply()], clock), prompts=PROMPTS,
                           runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
-                          executor_factory=lambda _l: FakeExecutor(clock))
+                          executor_factory=lambda _l: FakeExecutor(clock), limits=Limits(text_only_limit=1))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     assert any("would not stop" in p for p in notes["finish_problems"])
     assert {"stop_target", "collect_events", "down"} <= set(lab.calls)       # none of the rest was skipped
@@ -344,7 +348,8 @@ def test_ctrl_c_during_teardown_still_writes_the_record_and_then_propagates(tmp_
     lab = InterruptedDown(clock, run_dir=tmp_path)
     with pytest.raises(KeyboardInterrupt):
         execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([text_reply()], clock),
-                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT)
+                    prompts=PROMPTS, runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
+                    limits=Limits(text_only_limit=1))
     run_dir = tmp_path / RUN_ID
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     assert "KeyboardInterrupt" in notes["down_error"]
@@ -533,7 +538,8 @@ def test_the_target_is_probed_with_retries_during_the_run(tmp_path):
     clock = FakeClock()
     lab = Recording(clock, run_dir=tmp_path)
     execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([command("ls"), text_reply()], clock), prompts=PROMPTS,
-                runs_dir=tmp_path, clock=clock, harness_commit=COMMIT, executor_factory=lambda _l: FakeExecutor(clock))
+                runs_dir=tmp_path, clock=clock, harness_commit=COMMIT, executor_factory=lambda _l: FakeExecutor(clock),
+                limits=Limits(text_only_limit=1))
     assert "health:4" in lab.calls            # after the command; the start and final probes are single
 
 
@@ -586,12 +592,13 @@ class FakeLocalModel(FakeModel):
                 "rendered_prefix_sha256": "sha256:" + "e" * 64, "weights_path": self.weights_path}
 
 
-def run_local(tmp_path, script, *, seed=None, **model_kwargs):
+def run_local(tmp_path, script, *, seed=None, limits=None, **model_kwargs):
     clock = FakeClock()
     lab = FakeLab(clock, run_dir=tmp_path)
     model = FakeLocalModel(script, clock, lab=lab, **model_kwargs)
     run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=model, prompts=PROMPTS, runs_dir=tmp_path, clock=clock,
-                          harness_commit=COMMIT, seed=seed or new_seed("B"), executor_factory=lambda _l: FakeExecutor(clock))
+                          harness_commit=COMMIT, seed=seed or new_seed("B"), executor_factory=lambda _l: FakeExecutor(clock),
+                          limits=limits if limits is not None else Limits(text_only_limit=1))
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     return run_dir, manifest, notes, lab, model

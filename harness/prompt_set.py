@@ -69,6 +69,11 @@ class Prompts:
     def empty_output_notice(self) -> str:
         return self.messages["empty_output_notice"]
 
+    @property
+    def continue_nudge(self) -> str:
+        """D-083: sent instead of ending the run on a text-only turn, up to Limits.text_only_limit times."""
+        return self.messages["continue_nudge"]
+
     def error_text(self, cause: str) -> str:
         return self.messages["errors"][cause]
 
@@ -83,6 +88,7 @@ class Prompts:
             self.truncation_marker,
             self.timeout_notice,
             self.empty_output_notice,
+            self.continue_nudge,
             *self.messages["errors"].values(),
         ]
 

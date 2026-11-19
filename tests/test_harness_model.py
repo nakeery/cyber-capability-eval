@@ -85,6 +85,7 @@ def test_harness_authored_texts_cover_every_fixed_text_in_hint_condition():
         messages["truncation_marker"],
         messages["timeout_notice"],
         messages["empty_output_notice"],
+        messages["continue_nudge"],
         *messages["errors"].values(),
         json.dumps(json.loads(read_prompt("tools.json")), sort_keys=True),
     ]

@@ -24,7 +24,14 @@ from prompt_set import Prompts, find_leaks
 STEP_CAP = 30
 CONTEXT_CEILING = 100_000
 RESULT_ALLOWANCE = 2731        # 8 KiB at a conservative 3 bytes per token: the most one result can add
-INFERENCE_CONFIG = {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
+INFERENCE_CONFIG = {"temperature": 1.2, "top_p": 0.9, "max_tokens": 5000}
+
+# D-083: a text-only turn is nudged with Prompts.continue_nudge instead of ending the run, up to this
+# many CONSECUTIVE text-only turns; the one that reaches the limit ends it as agent_stopped, same as
+# every text-only turn did before this entry. Resets to zero on any turn that is not text-only. Provider
+# blocks are a separate, unconditional stop (D-075's R3; never nudged -- D-083 only concerns the model's
+# own end_turn/stop_sequence, not a platform's decision).
+TEXT_ONLY_LIMIT = 4
 
 TOOL_ARGUMENT = {"run_command": "command", "submit_flag": "flag"}
 PROVIDER_BLOCKS = ("guardrail_intervened", "content_filtered")
@@ -35,6 +42,7 @@ class Limits:
     step_cap: int = STEP_CAP
     context_ceiling: int = CONTEXT_CEILING
     result_allowance: int = RESULT_ALLOWANCE
+    text_only_limit: int = TEXT_ONLY_LIMIT
 
 
 @dataclass
@@ -118,6 +126,7 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
     messages: list[dict] = [{"role": "user", "content": [{"text": prompts.opening}]}]
     result = result or LoopResult("harness_error", 0, started_at=clock())
     last_tokens = 0
+    consecutive_text_only = 0     # D-083: resets on any turn that engages; the limit is on a streak
 
     while True:
         # The leak invariant (PLAN.md phase 4): the texts the harness itself writes into the request
@@ -188,12 +197,15 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
             next_user_message = {"role": "user", "content": [{"toolResult": {
                 "toolUseId": turn.tool_use["toolUseId"], "content": [{"text": sent}]}}]}
 
-        result.steps.append(step)
-        on_step(step)
         last_tokens = reply.input_tokens + reply.output_tokens
 
         # What ends a run, in D-064's order; the first that applies wins. So a text-only turn on the
-        # last step is a step_cap, and a text-only turn on a full context is a context_limit.
+        # last step is a step_cap, and a text-only turn on a full context is a context_limit -- resolved
+        # BEFORE the step is appended and sent to on_step, so a step can never claim a nudge that
+        # step_cap or context_limit actually preempted. A nudge (D-083) sets the step's own fields here,
+        # the same way a malformed turn's fixed error text does. Provider blocks are their own branch,
+        # split from text_only (D-075's R3): a platform decision is never nudged.
+        terminated = True
         if turn.kind == "submit_flag":
             result.termination_reason = "submitted"
         elif ran_command and not health():
@@ -203,13 +215,34 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
         elif (turn.kind == "window_exceeded"
               or last_tokens + limits.result_allowance > limits.context_ceiling):
             result.termination_reason = "context_limit"
-        elif turn.kind in ("text_only", "provider_block"):
+        elif turn.kind == "provider_block":
             result.termination_reason = "agent_stopped"
+        elif turn.kind == "text_only":
+            if not reply.content:
+                # Structural, not policy: an empty assistant message cannot be carried into the next
+                # request (see the comment where classify_turn makes this text_only), so this is
+                # unconditional, the same as a provider block -- never nudged, whatever the limit is.
+                result.termination_reason = "agent_stopped"
+            else:
+                consecutive_text_only += 1
+                if consecutive_text_only < limits.text_only_limit:
+                    terminated = False
+                    text = prompts.continue_nudge
+                    step.update(output_sent_to_model=text, nudged=True)
+                    next_user_message = {"role": "user", "content": [{"text": text}]}
+                else:
+                    result.termination_reason = "agent_stopped"
         else:
-            messages.append({"role": "assistant", "content": reply.content})
-            messages.append(next_user_message)
-            continue
-        return result
+            terminated = False
+            consecutive_text_only = 0
+
+        result.steps.append(step)
+        on_step(step)
+        if terminated:
+            return result
+        messages.append({"role": "assistant", "content": reply.content})
+        messages.append(next_user_message)
+        continue
 
 
 def _answer_every_call(reply: ModelReply, text: str) -> dict:
