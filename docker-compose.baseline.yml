@@ -1,0 +1,10 @@
+# The sqlmap baseline only (D-089): swaps the attacker service's image for the baseline image, which holds sqlmap.
+# It changes the image and nothing else: the hardening, the container user that is not the exec user, the tmpfs
+# mounts, the network and the volumes all come from docker-compose.yml, so the baseline is judged by the same
+# preflight as an agent run. The agent's own runs never use this file (harness/lab.py's compose_files adds it only
+# for a baseline Lab), and the preflight checks the running container's image so a mix-up cannot pass.
+# Use: docker compose -f docker-compose.yml -f docker-compose.baseline.yml ...
+services:
+  attacker:
+    build: ./baseline
+    image: lab-baseline:dev

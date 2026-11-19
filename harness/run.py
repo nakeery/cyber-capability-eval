@@ -439,7 +439,9 @@ def summarize(run_dir: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("build")
+    build = sub.add_parser("build")
+    build.add_argument("--baseline", action="store_true",
+                       help="build the sqlmap baseline's images (D-089) instead of the agent's: the target and lab-baseline")
     sub.add_parser("sweep")
     run = sub.add_parser("run")
     run.add_argument("variant", choices=sorted(VARIANTS))
@@ -458,8 +460,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with run_lock():
             if args.command == "build":
-                Lab("B", uuid.uuid4().hex).build_images()
-                print("images built")
+                Lab("B", uuid.uuid4().hex, baseline=args.baseline).build_images()
+                print("baseline images built" if args.baseline else "images built")
                 return 0
             if args.command == "sweep":
                 print("removed:", Lab("B", uuid.uuid4().hex).sweep())
