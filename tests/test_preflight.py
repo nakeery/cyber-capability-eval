@@ -44,7 +44,7 @@ def good_config(variant):
             "name": "lab-x_lab_net", "internal": True, "driver_opts": {GATEWAY_MODE_OPTION: "isolated"},
         }},
         "services": {
-            "attacker": hardened_service("10003:10003"),     # not the agent's uid (10002): D-075
+            "attacker": {**hardened_service("10003:10003"), "image": "lab-attacker:dev"},     # not the agent's uid (10002): D-075
             "target": hardened_service("10001:10001"),
         },
     }
@@ -351,6 +351,7 @@ def good_inspect(service="attacker", variant="B", project=PROJECT):
             "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
         },
         "Config": {"User": "10003:10003" if service == "attacker" else "10001:10001",     # the agent is 10002 (D-075)
+                   "Image": "lab-attacker:dev" if service == "attacker" else "lab-target:dev",
                    "Env": ["PATH=/usr/local/bin", "LANG=C.UTF-8", "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305"]},
         "Mounts": mounts if variant == "D" else [],
     }
@@ -487,3 +488,58 @@ def test_an_agent_user_id_that_is_not_an_integer_cannot_be_compared_and_fails(ui
 @pytest.mark.parametrize("info,report", [(None, GOOD_REPORT), (good_inspect("attacker"), None), ("x", []), ([], "x")])
 def test_an_unusable_record_or_report_fails_closed(info, report):
     assert_reported(check_agent_isolated_from_main(info, report), "no usable")
+
+
+# --- which image the attacker service runs (D-089) -----------------------------------------------
+
+AGENT_IMAGE, BASELINE_IMAGE = "lab-attacker:dev", "lab-baseline:dev"
+
+
+def test_the_compose_config_must_name_the_expected_attacker_image():
+    config = good_config("B")
+    assert check_compose_config(config, "B", attacker_image=AGENT_IMAGE) == []
+    assert_reported(check_compose_config(config, "B", attacker_image=BASELINE_IMAGE),
+                    f"the attacker's image is {AGENT_IMAGE!r}, expected {BASELINE_IMAGE!r}")
+
+
+def test_a_baseline_image_on_an_agent_run_is_refused_in_the_compose_config():
+    """D-003 from the other side: sqlmap's image must never be what the agent's shell runs in."""
+    config = good_config("B")
+    attacker(config)["image"] = BASELINE_IMAGE
+    assert_reported(check_compose_config(config, "B", attacker_image=AGENT_IMAGE),
+                    f"the attacker's image is {BASELINE_IMAGE!r}, expected {AGENT_IMAGE!r}")
+
+
+def test_a_missing_attacker_image_is_refused_when_one_is_expected():
+    config = good_config("B")
+    del attacker(config)["image"]
+    assert_reported(check_compose_config(config, "B", attacker_image=AGENT_IMAGE), "the attacker's image is None")
+
+
+def test_the_compose_config_asks_nothing_about_the_image_when_none_is_expected():
+    config = good_config("B")
+    del attacker(config)["image"]
+    assert check_compose_config(config, "B") == []
+
+
+@pytest.mark.parametrize("expected, actual", [(AGENT_IMAGE, BASELINE_IMAGE), (BASELINE_IMAGE, AGENT_IMAGE), (AGENT_IMAGE, None)])
+def test_a_live_attacker_with_the_wrong_image_is_refused(expected, actual):
+    info = good_inspect("attacker")
+    if actual is None:
+        del info["Config"]["Image"]
+    else:
+        info["Config"]["Image"] = actual
+    assert_reported(check_live_container(info, "attacker", "B", PROJECT, expected_image=expected), "runs image")
+
+
+@pytest.mark.parametrize("image", [AGENT_IMAGE, BASELINE_IMAGE])
+def test_a_live_attacker_with_the_expected_image_passes(image):
+    info = good_inspect("attacker")
+    info["Config"]["Image"] = image
+    assert check_live_container(info, "attacker", "B", PROJECT, expected_image=image) == []
+
+
+def test_a_live_container_is_not_asked_about_its_image_when_none_is_expected():
+    info = good_inspect("attacker")
+    del info["Config"]["Image"]
+    assert check_live_container(info, "attacker", "B", PROJECT) == []

@@ -29,7 +29,7 @@ SEED = {"variant_config": {"items_table": "stock", "users_table": "operators"}}
 GOOD_CONFIG = {
     "networks": {"lab_net": {"internal": True, "driver_opts": {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}}},
     "services": {
-        "attacker": {"networks": {"lab_net": {}}, "cap_drop": ["ALL"], "read_only": True,
+        "attacker": {"image": "lab-attacker:dev", "networks": {"lab_net": {}}, "cap_drop": ["ALL"], "read_only": True,
                      "security_opt": ["no-new-privileges:true"], "user": "agent",
                      "pids_limit": 128, "mem_limit": "512m", "cpus": 1.0, "restart": "no", "pull_policy": "never"},
         "target": {"networks": {"lab_net": {}}, "cap_drop": ["ALL"], "read_only": True,
@@ -78,12 +78,12 @@ class FakeRunner:
         return subprocess.CompletedProcess(argv, code, out, err)
 
 
-def make_box(respond=None, responses=(), variant="B", work_dir=None):
+def make_box(respond=None, responses=(), variant="B", work_dir=None, baseline=False):
     """A Lab on a fake runner. Anything that calls `collect_events` must pass `work_dir=tmp_path`: the log is written to a
     scratch file there, and with no work_dir the Lab falls back to the repository's own `runs/`, which is gitignored (absent
     in a fresh checkout, so CI failed) and which a test must not write into on a developer's machine either."""
     runner = FakeRunner(respond, responses)
-    return Lab(variant, RUN_ID, runner=runner, work_dir=work_dir), runner
+    return Lab(variant, RUN_ID, runner=runner, work_dir=work_dir, baseline=baseline), runner
 
 
 def always(code=0, stdout=b"", stderr=b""):
@@ -155,6 +155,37 @@ def test_variant_d_adds_the_shortcut_override_after_the_base_file():
 @pytest.mark.parametrize("variant", ["A", "B", "C"])
 def test_other_variants_use_the_base_file_only(variant):
     assert lab.compose_files(variant) == [lab.BASE_FILE]
+
+
+def test_a_baseline_run_adds_the_baseline_override_last():
+    assert lab.compose_files("B", baseline=True) == [lab.BASE_FILE, lab.BASELINE_FILE]
+    assert lab.compose_files("D", baseline=True) == [lab.BASE_FILE, lab.D_FILE, lab.BASELINE_FILE]
+
+
+@pytest.mark.parametrize("variant", ["A", "B", "C", "D"])
+def test_an_agent_run_never_gets_the_baseline_override(variant):
+    assert lab.BASELINE_FILE not in lab.compose_files(variant)
+    runner = FakeRunner()
+    Lab(variant, RUN_ID, runner=runner).up()
+    assert str(lab.BASELINE_FILE) not in runner.calls[0][0]
+
+
+def test_a_lab_expects_its_own_attacker_image():
+    assert Lab("B", RUN_ID, runner=FakeRunner()).attacker_image == "lab-attacker:dev"
+    assert Lab("B", RUN_ID, runner=FakeRunner(), baseline=True).attacker_image == "lab-baseline:dev"
+
+
+@pytest.mark.parametrize("variant, files", [
+    ("B", [lab.BASE_FILE, lab.BASELINE_FILE]),
+    ("D", [lab.BASE_FILE, lab.D_FILE, lab.BASELINE_FILE]),
+])
+def test_a_baseline_lab_starts_with_every_file_it_needs(variant, files):
+    runner = FakeRunner()
+    Lab(variant, RUN_ID, runner=runner, baseline=True).up()
+    expected = ["docker", "compose", "-p", PROJECT]
+    for path in files:
+        expected += ["-f", str(path)]
+    assert runner.calls[0][0] == expected + ["up", "-d", "--no-build"]
 
 
 @pytest.mark.parametrize("name, expected", [
@@ -702,3 +733,45 @@ def test_run_docker_writes_to_a_file_when_asked(tmp_path, monkeypatch):
     target = tmp_path / "out"
     done = lab.run_docker(["docker", "logs", "x"], stdout_to=target)
     assert target.read_bytes() == b"hello" and "capture_output" not in seen and seen["stderr"] == subprocess.PIPE
+
+
+# --- a baseline lab's preflight judges the image it runs (D-089) -----------------------------------
+
+def baseline_responder(*, config_image="lab-baseline:dev", live_image="lab-baseline:dev"):
+    """The preflight responder with the attacker's image changed in the compose config and in the running container."""
+    config = copy.deepcopy(GOOD_CONFIG)
+    config["services"]["attacker"]["image"] = config_image
+
+    def respond(argv):
+        if argv[1] == "inspect" and "--format" not in argv and argv[2] == ATTACKER:
+            info = good_inspect("attacker", "B", PROJECT)
+            info["Config"]["Image"] = live_image
+            return 0, json.dumps([info]).encode(), b""
+        return preflight_responder(config)(argv)
+    return respond
+
+
+def test_a_baseline_lab_passes_its_preflight_with_the_baseline_image():
+    box, _ = make_box(baseline_responder(), baseline=True)
+    assert box.preflight()["isolated"] is True
+
+
+def test_a_baseline_lab_refuses_the_agents_image():
+    box, _ = make_box(baseline_responder(config_image="lab-attacker:dev", live_image="lab-attacker:dev"), baseline=True)
+    with pytest.raises(HarnessError, match="expected 'lab-baseline:dev'"):
+        box.preflight()
+
+
+def test_an_agent_lab_refuses_the_baseline_image_in_the_file_and_in_the_running_container():
+    """sqlmap's image under an agent's run is the D-003 breach: both the file and the live container say so."""
+    box, _ = make_box(baseline_responder())
+    with pytest.raises(HarnessError) as caught:
+        box.preflight()
+    assert "compose: the attacker's image is 'lab-baseline:dev'" in str(caught.value)
+    assert "live attacker: runs image 'lab-baseline:dev'" in str(caught.value)
+
+
+def test_a_baseline_lab_refuses_a_running_container_whose_image_differs_from_the_file():
+    box, _ = make_box(baseline_responder(live_image="lab-attacker:dev"), baseline=True)
+    with pytest.raises(HarnessError, match="live attacker: runs image 'lab-attacker:dev'"):
+        box.preflight()

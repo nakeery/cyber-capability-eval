@@ -1851,3 +1851,43 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Not built.** `events_chain` and its tests (the rule functions refactored out of `walk_chain` without changing any score, then `tests/mutation_check.py` re-run with every mutant killed); the `lab-baseline` image, compose override, preflight and a real-Docker test; the glue script with unit tests against fake dumps; a baseline command in `harness/run.py` or a sibling; a `containment-auditor` pass on the new container; the comparison table's code.
 
 **Constrains:** PLAN.md phase 5's sqlmap bullet (edited with this entry), the `baselines/` directory, `docker-compose.baseline.yml`, `scoring/scorer.py` (a refactor only).
+
+
+---
+
+## D-090: The `lab-baseline` image and compose override are built as D-089 specified, with an image check in the preflight; the fit measurement shows no deviation is needed
+
+**Date:** 2026-11-19 · **Status:** accepted (a record of what was built and measured, at the author's request; the limits stay as they were, so nothing is changed) · **Builds:** D-089 item 6 (placement) and closes its two build-time checks · **Relates to:** D-003 (sqlmap is not in the agent's image), D-039 (build context), D-065 and D-075 (the preflight and the container user), D-074 (the log-flood limit)
+
+**Built:**
+- **The image.** `baseline/Dockerfile` builds `lab-baseline:dev` from `python:3.13-slim`, the attacker's base. Its only addition is sqlmap 1.10.11, installed from `baseline/requirements.txt` with `--require-hashes --no-deps`, pinned by the sha256 of the wheel published on PyPI (the release carries no dependencies). The user is the attacker image's `agent` (uid 10002); build context is `baseline/` only. The attacker image is unchanged.
+- **The override.** `docker-compose.baseline.yml` changes the attacker service's `build` and `image` and nothing else, so the hardening, the container user that is not the exec user, the tmpfs mounts, the network and the volumes all come from `docker-compose.yml` and the baseline is judged by the same preflight. A real-Docker test compares the two merged configs and fails if the override changes anything but those two keys.
+- **Wiring.** `compose_files(variant, baseline)` adds the override last (after variant D's, for D); `Lab(baseline=True)` expects `lab-baseline:dev`; `run.py build --baseline` builds the baseline images.
+- **A new preflight check, not in D-089: which image the attacker service runs.** `check_compose_config` (given `attacker_image`) and `check_live_container` (given `expected_image`) fail when the attacker service is not exactly the expected image, in the file and in the running container. An agent run expects `lab-attacker:dev` and a baseline run expects `lab-baseline:dev`, so sqlmap's image can never sit under an agent's shell by a mix-up (D-003's boundary, now checked, not assumed). Both parameters are optional and default to no check; the lab always passes them.
+- **Tests.** Unit tests in `tests/test_preflight.py` and `tests/test_lab.py`, and real-Docker tests in `tests/test_lab_docker.py` (skipped without the baseline image): the same real preflight on A, B, C and D, sqlmap present in the baseline container and absent from the agent's, the agent user with a writable home and a read-only root, and a signal to PID 1 refused.
+
+**Measured (D-089's build-time checks).** Method: a seeded baseline lab held open, the author running sqlmap's stage 1 by hand, and the container's own cgroup v2 counters read at the end. One run each on B and C; the author reports B's run completed and wrote a dump, and C's took about 11 s and found nothing to exploit. Limits tested are the base file's: 256 MiB memory (tmpfs included), 0.5 CPU, 128 PIDs, a 32 MiB `/home/agent` tmpfs.
+
+| | Lab idle (preflight only) | B | C |
+|---|---|---|---|
+| Peak memory | 19.6 MiB | 39.3 MiB (15.3%) | 39.9 MiB (15.6%) |
+| `memory.events` max / oom / oom_kill | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Peak processes | 8 | 8 | 8 |
+| `/home/agent` tmpfs used | | 16 KiB | 12 KiB |
+| CPU used | 0.35 s | 1.09 s | 1.22 s |
+| Periods throttled / elapsed periods | 5 / 11 | 17 / 32 | 19 / 122 |
+| Time throttled | | 0.79 s | 0.82 s |
+| Target log lines | | 119 | 178 |
+
+**Decision:** no deviation. The baseline container keeps the base file's limits. Memory peaked at about 40 MiB of 256 on both variants with no memory event, the tmpfs used at most 16 KiB of 32 MiB, and the target log stayed at a few hundred lines against D-074's 50 MiB limit. D-089's allowance for a larger memory limit on the baseline container alone is therefore not used.
+
+**What the numbers do and do not say:**
+- CPU used was 1.09 s on B and 1.22 s on C although the two stages lasted about 3 s and 12 s, and throttled time was 0.79 s and 0.82 s: most of the CPU time is a start-up burst against the 0.5 share, not a rate that grows with run length. Throttling stretches wall-clock time against D-089's 15-minute cap, and at these durations that is seconds. It is the only limit that bound, and it is left as it is so the baseline stays under the agent's hardening.
+- One run per variant. A and D were not measured (D adds a read-only volume the baseline never touches). Both runs were short; a heavier run, for example one that is still working at the 15-minute cap, is not covered. The cgroup counters make it checkable cheaply, so the baseline's own run record should keep `memory.peak`, `memory.events` and `cpu.stat` from each run, and a baseline run whose counters show a memory event or an OOM kill is reported, not silently counted (D-089 item 5 already records the cap and log-flood facts).
+- Not measured here: sqlmap's behavior, only the container's resource use.
+
+**Rejected:** raising the baseline container's memory or CPU preemptively (the measurements give no reason, and a baseline under a different budget from the agent's is a comparison problem of its own); measuring by sampling `docker stats` (a snapshot after the run read 3.5 MiB and 0% CPU, an idle reading, which is why the kernel's own high-water marks are used).
+
+**Not built yet (D-089's list, minus this entry):** the glue script, a baseline run command in `harness/run.py` or a sibling, a `containment-auditor` pass on the new container, the comparison table's code.
+
+**Constrains:** `baseline/`, `docker-compose.baseline.yml`, `harness/lab.py`, `harness/preflight.py`, `harness/run.py` (`build --baseline`), `tests/test_lab.py`, `tests/test_preflight.py`, `tests/test_lab_docker.py`.

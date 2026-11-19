@@ -42,6 +42,8 @@ RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")     # a uuid4's hex form, the sam
 PROJECT_PREFIX = "lab-"
 PROJECT_LABEL = "com.docker.compose.project"
 BASE_FILE, D_FILE = ROOT / "docker-compose.yml", ROOT / "docker-compose.d.yml"
+BASELINE_FILE = ROOT / "docker-compose.baseline.yml"    # D-089: swaps the attacker's image for the sqlmap baseline's
+ATTACKER_IMAGE, BASELINE_IMAGE = "lab-attacker:dev", "lab-baseline:dev"
 TARGET_UID = "10001"
 READY_TIMEOUT_S = 30
 MIN_FREE_BYTES = 1024 ** 3            # D-042: the log has no rotation, so a nearly full disk ends a run badly
@@ -85,9 +87,11 @@ def is_lab_project(name: str) -> bool:
     return name.startswith(PROJECT_PREFIX) or name == "lab"
 
 
-def compose_files(variant: str) -> list[Path]:
-    """An allow-list: the base file, plus the D override for variant D and nothing else."""
-    return [BASE_FILE, D_FILE] if variant == "D" else [BASE_FILE]
+def compose_files(variant: str, baseline: bool = False) -> list[Path]:
+    """An allow-list: the base file, the D override for variant D, and the baseline override for a
+    baseline run (D-089), in that order, and nothing else."""
+    files = [BASE_FILE, D_FILE] if variant == "D" else [BASE_FILE]
+    return files + [BASELINE_FILE] if baseline else files
 
 
 def parse_labels(text: str) -> dict[str, str]:
@@ -106,9 +110,11 @@ class Lab:
     run_id: str
     runner: Runner = run_docker
     work_dir: Path | None = None    # where the target's log is written while it is read; run.py sets the run's directory
+    baseline: bool = False          # D-089: the attacker service runs the sqlmap baseline's image, not the agent's
 
     def __post_init__(self) -> None:
         self.project = project_name(self.run_id)
+        self.attacker_image = BASELINE_IMAGE if self.baseline else ATTACKER_IMAGE
         self.attacker = f"{self.project}-attacker-1"
         self.target = f"{self.project}-target-1"
 
@@ -124,7 +130,7 @@ class Lab:
         return done
 
     def _compose(self, *args: str, check: bool = True, timeout: float = DOCKER_TIMEOUT_S):
-        files = [part for path in compose_files(self.variant) for part in ("-f", str(path))]
+        files = [part for path in compose_files(self.variant, self.baseline) for part in ("-f", str(path))]
         return self._docker("compose", "-p", self.project, *files, *args, check=check, timeout=timeout)
 
     def _exec(self, container: str, *args: str, user: str | None = None, input: bytes | None = None,
@@ -229,7 +235,7 @@ class Lab:
 
     def preflight(self) -> dict:
         """Every preflight check; raises one HarnessError naming every failure. Returns a report."""
-        problems = check_compose_config(self.compose_config(), self.variant)
+        problems = check_compose_config(self.compose_config(), self.variant, attacker_image=self.attacker_image)
         gateway, isolated, internal = self.network_facts()
         if not isolated:
             problems.append("the lab network was not created in isolated-gateway mode (D-066)")
@@ -238,7 +244,8 @@ class Lab:
         inspected: dict = {}
         for service, container in (("attacker", self.attacker), ("target", self.target)):
             inspected[service] = self._inspect(container)
-            problems += check_live_container(inspected[service], service, self.variant, self.project)
+            problems += check_live_container(inspected[service], service, self.variant, self.project,
+                                             expected_image=self.attacker_image if service == "attacker" else None)
         probe = (ROOT / "harness" / "network_probe.py").read_bytes()
         done = self._exec(self.attacker, "python3", "-", gateway or "", user="agent", input=probe,
                           check=False, timeout=180)
