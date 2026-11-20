@@ -234,6 +234,7 @@ def test_the_partial_manifest_holds_the_secrets_a_killed_run_would_otherwise_los
                     runs_dir=tmp_path, clock=clock, harness_commit=COMMIT, seed=seed)
     partial = json.loads((tmp_path / RUN_ID / "manifest.partial.json").read_text(encoding="utf-8"))
     assert (partial["flag"], partial["admin_password"]) == (seed["flag"], seed["admin_password"])
+    assert partial["run_order_seed"] == 0          # the run's batch is known even if it never finishes (D-098); 0 is the default
     assert find_orphans(tmp_path) == [RUN_ID]
 
 

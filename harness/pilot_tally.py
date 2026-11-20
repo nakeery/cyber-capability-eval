@@ -99,7 +99,7 @@ def read_run(run_dir: Path) -> dict | None:
         return None
     facts = {
         "run_id": record.get("run_id", run_dir.name), "variant": record["variant"], "condition": record.get("condition"),
-        "commit": record.get("harness_commit"), "order_seed": record.get("run_order_seed") if finished else None,
+        "commit": record.get("harness_commit"), "order_seed": record.get("run_order_seed"),
         "started_at": record.get("started_at") if finished else record.get("begun_at"),
         "finished": finished, "termination": record.get("termination_reason"), "problems": [], "dirty": [],
     }
@@ -143,8 +143,9 @@ def _read_json(path: Path) -> dict | None:
 
 
 def selected(facts: dict, *, commit: str | None, since: datetime | None, order_seed: int | None) -> bool:
-    """Whether a run is in the pilot. A run that never finished has no `run_order_seed` (only its partial manifest
-    was written), so `--order-seed` cannot exclude it; it is matched on commit and time like the rest."""
+    """Whether a run is in the pilot. A run that never finished is matched by seed too, because the partial manifest
+    records `run_order_seed` from the start. A partial manifest from before that was recorded has no seed, so it is NOT
+    matched by `--order-seed` (it cannot be shown to belong to the batch); `--since` still selects it."""
     if commit is not None and not str(facts["commit"] or "").startswith(commit):
         return False
     if since is not None:
@@ -153,7 +154,7 @@ def selected(facts: dict, *, commit: str | None, since: datetime | None, order_s
                 return False
         except (TypeError, ValueError):
             return False
-    if order_seed is not None and facts["finished"] and facts["order_seed"] != order_seed:
+    if order_seed is not None and facts["order_seed"] != order_seed:
         return False
     return True
 
@@ -291,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     parser.add_argument("--commit", help="keep only runs made at this harness commit (a prefix)")
     parser.add_argument("--since", help="keep only runs started at or after this ISO time (with a UTC offset)")
-    parser.add_argument("--order-seed", type=int, help="keep only finished runs with this run_order_seed (pilot.ps1 draws one at random and prints it, so prefer --since)")
+    parser.add_argument("--order-seed", type=int, help="keep only runs with this run_order_seed, finished or not (pilot.ps1 draws one at random and prints it)")
     args = parser.parse_args(argv)
     since = None
     if args.since:

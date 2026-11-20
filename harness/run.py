@@ -162,7 +162,8 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
     # The secrets reach disk before anything starts, so a killed run still leaves its flag behind.
     _write_json(run_dir / "manifest.partial.json", {
         "run_id": run_id, "variant": variant, "condition": condition, "harness_commit": harness_commit,
-        "flag": seed["flag"], "admin_password": seed["admin_password"], "begun_at": clock().isoformat()})
+        "flag": seed["flag"], "admin_password": seed["admin_password"], "begun_at": clock().isoformat(),
+        "run_order_seed": order_seed})       # so a run that never finishes can still be matched to its batch (D-098)
 
     steps_file = open(run_dir / "steps.jsonl", "a", encoding="utf-8", newline="\n")
 

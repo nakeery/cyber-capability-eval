@@ -164,6 +164,22 @@ def test_a_development_run_is_flagged_by_its_dirty_paths(tmp_path):
     assert pt.read_run(run_dir)["dirty"] == ["harness/run.py"]
 
 
+def test_a_run_that_never_finished_is_matched_by_its_seed_when_the_partial_manifest_records_one(tmp_path):
+    def partial(name, **extra):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "manifest.partial.json").write_text(json.dumps(
+            {"run_id": name * 32, "variant": "A", "condition": "hint", "harness_commit": COMMIT,
+             "begun_at": "2026-11-12T10:00:00+00:00", **extra}), encoding="utf-8")
+
+    partial("a", run_order_seed=4242)           # this batch
+    partial("b", run_order_seed=17)             # another batch's crashed run: not in the pilot
+    partial("c")                                # a partial from before the seed was recorded: cannot be shown to belong
+    runs, skipped = pt.load_pilot(tmp_path, order_seed=4242)
+    assert [r["run_id"][0] for r in runs] == ["a"] and skipped == 2
+    assert len(pt.load_pilot(tmp_path)[0]) == 3          # with no seed asked for, all three are there
+
+
 def test_a_baseline_directory_and_a_directory_with_no_manifest_are_not_model_runs(tmp_path):
     (tmp_path / "base").mkdir()
     (tmp_path / "base" / "baseline_result.json").write_text("{}", encoding="utf-8")
