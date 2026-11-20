@@ -291,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     parser.add_argument("--commit", help="keep only runs made at this harness commit (a prefix)")
     parser.add_argument("--since", help="keep only runs started at or after this ISO time (with a UTC offset)")
-    parser.add_argument("--order-seed", type=int, help="keep only finished runs with this run_order_seed (pilot.ps1 uses 1)")
+    parser.add_argument("--order-seed", type=int, help="keep only finished runs with this run_order_seed (pilot.ps1 draws one at random and prints it, so prefer --since)")
     args = parser.parse_args(argv)
     since = None
     if args.since:

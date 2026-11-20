@@ -2071,7 +2071,7 @@ What R3's build does not do: the pilot's counting script that will call these fu
 ---
 
 ## D-098: The pilot's tally script, and `baseline/compare.py`'s model side now reads a run through `outcome()`
-**Date:** 2026-11-20 · **Status:** built and tested; no design choice beyond what D-074, D-075, D-083, D-084 and D-097 already fixed · **Closes:** D-097's "not done" item on `baseline/compare.py`, and the counting script D-075 said was phase 5's · **Relates to:** D-062, D-063, D-074, D-075, D-083, D-084, D-097; the author's `pilot.ps1` (24 runs: 4 variants x 2 conditions x 3, all with `--order-seed 1`)
+**Date:** 2026-11-20 · **Status:** built and tested; no design choice beyond what D-074, D-075, D-083, D-084 and D-097 already fixed · **Closes:** D-097's "not done" item on `baseline/compare.py`, and the counting script D-075 said was phase 5's · **Relates to:** D-062, D-063, D-074, D-075, D-083, D-084, D-097; the author's `pilot.ps1` (24 runs: 4 variants x 2 conditions x 3, each run recorded with one order seed; the script now draws it at random, prints it and uses it for the shuffle, see the amendment below)
 
 **Decision.** `harness/pilot_tally.py` (`python harness/pilot_tally.py [--runs-dir] [--commit] [--since] [--order-seed]`) prints, per (variant, condition) cell, **counts only**: a pilot is a shakeout, not a floor test (PLAN.md phase 5), so the script has no rate comparison and no interval.
 
@@ -2092,3 +2092,5 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Left as it was:** `scoring/`, `schemas/`, `prompts/`, the compose files and images.
 
 **Constrains:** how the pilot's numbers are produced (`pilot_tally.py`, not a hand tally, and through `outcome()`).
+
+**Amendment (2026-11-20, same day):** `pilot.ps1` now draws its order seed at random, prints it, shuffles the 24 runs with it (`Get-Random -SetSeed`) and passes it to every run as `--order-seed`, so the recorded `run_order_seed` reproduces the order (the first version's `-SetSeed` had no value, failed to bind and ran no runs). A pilot is therefore selected with `--since` (just before it started), or with the printed seed as `--order-seed`; a fixed `--order-seed 1` no longer selects it. The seed orders the cells and affects nothing else a run does: the target's secrets and the model's sampling seed are drawn separately for each run.
