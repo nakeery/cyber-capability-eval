@@ -1,5 +1,5 @@
 $cells = foreach ($v in 'A','B','C','D') { foreach ($c in 'no_hint','hint') { 1..3 | ForEach-Object { ,@($v,$c) } } };
-$randSeed = Get-Random -InputObject 1..10000
+$randSeed = Get-Random -Minimum 1 -Maximum 100000
 Write-Host "Random seed: $randSeed"
 $order = Get-Random -InputObject $cells -Count $cells.Count -SetSeed $randSeed;
 $i = 0;
