@@ -15,6 +15,14 @@ Selection is explicit and reported, never silent (D-089 item 5 asks for 5 per va
 
 Usage:
     .venv/Scripts/python baseline/compare.py [--commit HASH] [--exclude ID ...] [--model-run DIR ...]
+    .venv/Scripts/python baseline/compare.py --commit HASH --exclude ID --model-run-seed 16009
+
+`--model-run-seed` adds a pilot's model runs beside `--model-run`, resolved the same way `pilot_tally.py
+--order-seed` resolves them (same batch, D-098): every directory under `--runs-dir` whose manifest or partial
+manifest records that `run_order_seed`. A run that never finished is reported under "left out" like any other
+replaced run (D-074), never passed to `model_run_row` (which needs a full `manifest.json`). `--commit` and
+`--exclude` are the BASELINE's own filters and do not touch the model side; narrow a seed-selected batch by
+harness commit or run id yourself if you need to.
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ sys.path.insert(0, str(ROOT / "harness"))
 sys.path.insert(0, str(ROOT / "target"))
 sys.path.insert(0, str(ROOT / "scoring"))
 
+import pilot_tally  # noqa: E402  (D-098's reader: resolves --model-run-seed to run directories)
 import telemetry  # noqa: E402
 from filter_probe import wilson  # noqa: E402  (reused, not copied: one Wilson in the repo)
 from outcome import REPLACED, load_outcome  # noqa: E402
@@ -139,6 +148,21 @@ def check_expectations(by_variant: dict[str, list[dict]]) -> list[str]:
 # --- the model side ------------------------------------------------------------------------
 
 
+def resolve_model_run_seed(runs_dir: Path, order_seed: int) -> tuple[list[Path], list[tuple[str, str, str]], int]:
+    """A pilot's model run directories for `order_seed` (same batch `pilot_tally --order-seed` would read, D-098):
+    (finished run directories, left_out entries for the runs that never finished, directories skipped by the seed).
+    A run that never finished has only `manifest.partial.json`, which `model_run_row` cannot read (it needs a full
+    manifest), so it is reported here directly, the way D-074 reports any replaced run, never passed on."""
+    facts, skipped = pilot_tally.load_pilot(runs_dir, order_seed=order_seed)
+    dirs, left_out = [], []
+    for f in facts:
+        if f["finished"]:
+            dirs.append(Path(f["_dir"]))          # the directory read_run actually read, not reconstructed from run_id
+        else:
+            left_out.append((f["run_id"][:8], f["variant"], "model run, never finished (D-074: replaced, not counted)"))
+    return dirs, left_out, skipped
+
+
 def model_run_row(run_dir: Path) -> dict:
     """One model run, read the same way: events_chain on its target events, plus its score.json's `pass`
     when one exists. Raises ValueError if the run directory does not validate."""
@@ -217,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--commit", help="keep only baseline runs made at this harness commit (a prefix)")
     parser.add_argument("--exclude", nargs="*", default=[], help="baseline run ids (unique prefixes) to leave out")
     parser.add_argument("--model-run", nargs="*", default=[], type=Path, help="model run directories to add beside it")
+    parser.add_argument("--model-run-seed", type=int,
+                        help="add a pilot's model runs for this run_order_seed (D-098), beside --model-run")
     args = parser.parse_args(argv)
 
     results = load_baseline_results(args.runs_dir)
@@ -232,10 +258,17 @@ def main(argv: list[str] | None = None) -> int:
     by_variant: dict[str, list[dict]] = defaultdict(list)
     for r in included:
         by_variant[r["variant"]].append(r)
+    model_dirs = list(args.model_run)
+    if args.model_run_seed is not None:
+        seed_dirs, seed_left_out, skipped = resolve_model_run_seed(args.runs_dir, args.model_run_seed)
+        print(f"note: --model-run-seed {args.model_run_seed} matched {len(seed_dirs) + len(seed_left_out)} run(s) "
+              f"under {args.runs_dir} (skipped {skipped} other director{'y' if skipped == 1 else 'ies'}).\n")
+        model_dirs += seed_dirs
+        left_out += seed_left_out
     model_cells = None
-    if args.model_run:
+    if model_dirs:
         try:
-            rows = [model_run_row(d) for d in args.model_run]
+            rows = [model_run_row(d) for d in model_dirs]
         except ValueError as err:
             print(err)
             return 2

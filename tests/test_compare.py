@@ -267,3 +267,54 @@ def test_main_warns_when_results_span_commits_and_no_filter_is_given(tmp_path, c
             json.dumps(make_result(f"{i}" * 32, "A", commit=commit)), encoding="utf-8")
     compare.main(["--runs-dir", str(tmp_path)])
     assert "span 2 harness commits" in capsys.readouterr().out
+
+
+# --- --model-run-seed ----------------------------------------------------------------------
+
+def test_resolve_model_run_seed_finds_finished_runs_by_their_own_directory_not_by_run_id(tmp_path):
+    """`make()` always names a run's directory after its run_id, but `resolve_model_run_seed` must not assume
+    that: it has to use the directory `read_run` actually read (D-098's `read_run` does not care how a
+    directory is named, by design, and `pilot_tally`'s own tests copy runs into mismatched names to prove it)."""
+    from harness_fakes import command, submit, text_reply
+    from test_run import default_score_stub, make
+
+    ok, *_ = make(tmp_path / "src", [command("ls"), submit("x")], score_fn=default_score_stub)
+    pilot = tmp_path / "pilot"
+    pilot.mkdir()
+    mismatched = pilot / "not_the_run_id"       # deliberately not named after ok's run_id
+    import shutil
+    shutil.copytree(ok, mismatched)
+
+    (pilot / "crashed").mkdir()
+    (pilot / "crashed" / "manifest.partial.json").write_text(json.dumps(
+        {"run_id": "c" * 32, "variant": "A", "condition": "hint", "harness_commit": COMMIT,
+         "begun_at": "2026-11-12T10:00:00+00:00", "run_order_seed": 7}), encoding="utf-8")
+
+    dirs, left_out, skipped = compare.resolve_model_run_seed(pilot, order_seed=7)
+    assert dirs == [mismatched]                  # not pilot / <run_id>, which does not exist
+    assert len(left_out) == 1 and left_out[0][:2] == ("c" * 8, "A") and "never finished" in left_out[0][2]
+    assert skipped == 0
+
+
+def test_main_builds_the_model_table_from_a_seed_and_the_baseline_commit_filter_does_not_touch_it(tmp_path, capsys):
+    """The model run's own harness_commit ("b"*40, test_run.COMMIT) never matches the baseline --commit filter
+    ("f2c3134") used below, so the run reaching the model table proves --commit is the BASELINE's own filter,
+    as the docstring says, not a filter on --model-run-seed's selection."""
+    import shutil
+    from harness_fakes import command, submit
+    from test_run import default_score_stub, make
+
+    a, *_ = make(tmp_path / "src", [command("ls"), submit("x")], score_fn=default_score_stub, variant="A", condition="hint")
+    shutil.copytree(a, tmp_path / "modelrun")     # directly under --runs-dir, where `load_pilot`'s iterdir looks
+    for result in full_sweep():
+        run_dir = tmp_path / result["run_id"]
+        run_dir.mkdir()
+        (run_dir / "baseline_result.json").write_text(json.dumps(result), encoding="utf-8")
+
+    rc = compare.main(["--runs-dir", str(tmp_path), "--commit", "f2c3134", "--model-run-seed", "7"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "--model-run-seed 7 matched 1 run(s)" in out
+    row = next(line.split() for line in out.split("Model runs")[1].splitlines() if line.startswith("A") and "hint" in line)
+    assert row[:3] == ["A", "hint", "1"]          # the seed-selected run reached the model table
+    assert "5/5 [57%-100%]" in out                 # --commit still kept the baseline's f2c3134 runs, 5 per variant

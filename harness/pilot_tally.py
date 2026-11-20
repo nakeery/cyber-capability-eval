@@ -102,6 +102,7 @@ def read_run(run_dir: Path) -> dict | None:
         "commit": record.get("harness_commit"), "order_seed": record.get("run_order_seed"),
         "started_at": record.get("started_at") if finished else record.get("begun_at"),
         "finished": finished, "termination": record.get("termination_reason"), "problems": [], "dirty": [],
+        "_dir": str(run_dir),      # the directory actually read, never assumed from run_id (it need not match it)
     }
     if not finished:
         verdict = load_outcome(run_dir)
