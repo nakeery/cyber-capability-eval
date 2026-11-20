@@ -664,6 +664,21 @@ def test_the_attacker_is_running_only_when_docker_says_so():
     assert make_box(always(code=1, stderr=b"no such container"))[0].attacker_running() is False
 
 
+@pytest.mark.parametrize("stdout,code,expected", [
+    (b"false true 137 2026-11-12T10:00:00Z", 0, {"running": False, "oom_killed": True, "exit_code": 137,
+                                                  "finished_at": "2026-11-12T10:00:00Z"}),
+    (b"false false 0 2026-11-12T10:00:00Z", 0, {"running": False, "oom_killed": False, "exit_code": 0,
+                                                 "finished_at": "2026-11-12T10:00:00Z"}),
+    (b"true false 0 0001-01-01T00:00:00Z", 0, {"running": True, "oom_killed": False, "exit_code": 0,
+                                                "finished_at": "0001-01-01T00:00:00Z"}),
+    (b"", 1, {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}),           # no such container
+    (b"nonsense", 0, {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}),   # unreadable
+    (b"false maybe 1 t", 0, {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}),
+])
+def test_attacker_state_reports_docker_facts_and_never_guesses(stdout, code, expected):
+    assert make_box(always(code=code, stdout=stdout))[0].attacker_state() == expected
+
+
 def test_health_retries_before_calling_the_target_down(monkeypatch):
     monkeypatch.setattr(lab.time, "sleep", lambda s: None)
     answers = iter([1, 1, 0])
@@ -716,8 +731,9 @@ def test_an_oversized_target_log_is_refused_unread_and_the_scratch_file_is_remov
     monkeypatch.setattr(lab, "MAX_LOG_BYTES", 10)
     box, _ = make_box(always(stdout=b'{"seq":1,"padding":"xxxxxxxxxxxxxxxxxxxx"}\n'))
     box.work_dir = tmp_path
-    with pytest.raises(HarnessError, match="flooded"):
+    with pytest.raises(lab.LogFloodError, match="flooded") as raised:
         box.collect_events()
+    assert isinstance(raised.value, HarnessError) and raised.value.log_bytes > 10      # still a HarnessError, with the size kept
     assert list(tmp_path.iterdir()) == []
 
 

@@ -19,6 +19,7 @@ from agent import INFERENCE_CONFIG, Limits
 from harness_fakes import BEDROCK_INFERENCE, FakeClock, FakeExecutor, FakeModel, command, outcome, submit, text_reply
 from lab import HarnessError
 from model import ModelError
+from outcome import load_outcome
 from prompt_set import load_prompts
 from run import (UNKNOWN_DIGEST, default_score, find_orphans, git_provenance, new_seed, run_lock, summarize)
 from run import execute_run as _execute_run
@@ -45,6 +46,7 @@ class FakeLab:
         self.run_id, self.attacker, self.target, self.calls, self.seen_seed = RUN_ID, "lab-x-attacker-1", "lab-x-target-1", [], None
         self.partial_existed_at_up = None
         self.attacker_alive = True
+        self.attacker_facts = {"running": False, "oom_killed": False, "exit_code": 137, "finished_at": "2026-11-12T10:00:00Z"}
         self.fail_clock_after_first = False
 
     def _step(self, name):
@@ -85,6 +87,10 @@ class FakeLab:
     def attacker_running(self):
         self.calls.append("attacker_running")
         return self.attacker_alive
+
+    def attacker_state(self):
+        self.calls.append("attacker_state")
+        return dict(self.attacker_facts)
 
     def stop_attacker(self): self._step("stop_attacker"); self.clock.advance(2); return 143
     def target_exit_code(self): self._step("target_exit_code"); return None
@@ -557,6 +563,66 @@ def test_a_dead_attacker_ends_the_run_as_a_harness_error_before_the_model_sees_d
     assert manifest["termination_reason"] == "harness_error" and "attacker container is not running" in manifest["harness_error"]
     assert len(model.requests) == 1          # the daemon's text was recorded in the step, never sent to the model
     assert validate_run_dir(run_dir, include_score=False) == []
+
+
+def _dead_attacker_run(tmp_path, facts):
+    clock = FakeClock()
+    lab = FakeLab(clock, run_dir=tmp_path)
+    lab.attacker_alive, lab.attacker_facts = False, facts
+    run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([command("ls")], clock), prompts=PROMPTS,
+                          runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
+                          executor_factory=lambda _l: FakeExecutor(clock), score_fn=default_score_stub)
+    return run_dir, json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
+
+
+def default_score_stub(run_dir):
+    """Like the real scorer, leaves a score.json behind: outcome() reads that file."""
+    score = {"pass": False, "milestones": []}
+    (run_dir / "score.json").write_text(json.dumps(score), encoding="utf-8")
+    return score, []
+
+
+def test_a_dead_attacker_records_what_docker_says_and_the_outcome_follows_oom_killed(tmp_path):
+    # D-074 to-build item 2: the facts are recorded as facts. The outcome is decided from them, not from the message.
+    oom = {"running": False, "oom_killed": True, "exit_code": 137, "finished_at": "2026-11-12T10:00:00Z"}
+    run_dir, notes = _dead_attacker_run(tmp_path / "oom", oom)
+    assert notes["attacker_stopped"] == oom
+    assert (load_outcome(run_dir).kind, load_outcome(run_dir).passed) == ("fail", False)
+    plain = {"running": False, "oom_killed": False, "exit_code": 137, "finished_at": "2026-11-12T10:00:00Z"}
+    run_dir, notes = _dead_attacker_run(tmp_path / "plain", plain)
+    assert notes["attacker_stopped"] == plain and load_outcome(run_dir).kind == "replaced"
+
+
+def test_an_unreadable_attacker_state_is_never_taken_for_an_oom_kill(tmp_path):
+    unreadable = {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}
+    run_dir, notes = _dead_attacker_run(tmp_path, unreadable)
+    assert notes["attacker_stopped"]["oom_killed"] is None and load_outcome(run_dir).kind == "replaced"
+
+
+def test_a_flooded_log_is_recorded_as_a_structured_note_and_is_a_fail(tmp_path):
+    from lab import LogFloodError
+
+    class Flooding(FakeLab):
+        def collect_events(self):
+            self._step("collect_events")
+            raise LogFloodError("the target's log is 60 MiB: the agent flooded it", 60 * 2 ** 20)
+
+    clock = FakeClock()
+    lab = Flooding(clock, run_dir=tmp_path)
+    run_dir = execute_run(variant="B", condition="no_hint", lab=lab, model=FakeModel([submit("x")], clock), prompts=PROMPTS,
+                          runs_dir=tmp_path, clock=clock, harness_commit=COMMIT,
+                          executor_factory=lambda _l: FakeExecutor(clock), score_fn=default_score_stub)
+    notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert notes["log_flood"] == {"log_bytes": 60 * 2 ** 20} and manifest["termination_reason"] == "harness_error"
+    assert (load_outcome(run_dir).kind, load_outcome(run_dir).passed) == ("fail", False)   # an agent cause beats the correct submit
+
+
+def test_the_summary_shows_the_outcome(tmp_path):
+    run_dir, *_ = make(tmp_path, [submit("a guess")], score_fn=default_score_stub)
+    assert "outcome: scored (pass=False) - submitted" in summarize(run_dir)
+    run_dir, *_ = make(tmp_path / "b", [command("ls"), ModelError("slow", retries=4, kind="model_error")], score_fn=default_score_stub)
+    assert "outcome: replaced - api_error (model_error)" in summarize(run_dir)
 
 
 def test_the_target_is_probed_with_retries_during_the_run(tmp_path):

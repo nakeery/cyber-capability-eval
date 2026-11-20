@@ -2036,3 +2036,34 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Not done:** D-091 item 3's live Variant D proof beyond the D sweep runs (the sweep's five D runs are consistent with it but were not a purpose-built check); a hand-check that the baseline's `creds_extracted` count agrees with what `stage2` read from each dump (item 9 found nothing to check: no run had a login without `creds_extracted`); the comparison against the model's pilot cells, which do not exist yet (D-089 item 1 says the same function applies to them). The results live in the gitignored `runs/`; a write-up must copy the numbers, with the commit.
 
 **Constrains:** `baseline/compare.py`, `tests/test_compare.py`, PLAN.md's sqlmap bullet.
+
+---
+
+## D-097: R4 built: `outcome()` and the structured cause notes (D-074's to-build items 1 and 2)
+**Date:** 2026-11-20 · **Status:** built and tested; implements D-074's table without changing it · **Closes:** D-072's R4 (the build; phase 6 still pre-registers the table) · **Relates to:** D-057, D-074, D-075, D-086
+
+**Decision.** Two pieces, neither of which changes what the model is shown or how a run is scored.
+
+- **`harness/outcome.py`: `outcome(manifest, score, notes)`, a pure function** returning one of `scored` (the model's own ending: `submitted`, `agent_stopped`, `step_cap`, `context_limit`; the scorer's `pass` stands), `fail` (agent-caused; `pass` is False), `replaced` (infrastructure or harness; no pass) or `unscored` (a model's ending with no usable `score.json`). `load_outcome(run_dir)` is the thin file reader; a directory with no `manifest.json` (only the partial file) is `replaced`. An unknown `termination_reason` raises `ValueError`, and a test pins the function's endings to the manifest schema's enum, so a new ending cannot fall through to a default.
+- **Structured causes, recorded as facts in `harness_notes.json`:** `attacker_stopped` (`running`, `oom_killed`, `exit_code`, `finished_at`, from the new `Lab.attacker_state()`, written when `health()` finds the attacker not running) and `log_flood` (`log_bytes`, from the new `LogFloodError`, a `HarnessError` subclass that `Lab.collect_events` raises). The verdict is `outcome()`'s, not the harness's: the notes hold what Docker and the log said and no judgment.
+
+**Rules as built, where D-074 left room:**
+- A stopped attacker is agent-caused only when `oom_killed` is exactly `True`. Any other stop (exit 137 with no OOM kill, a vanished container, an unreadable state) is `replaced`, which is D-075's reading made into a rule. An unreadable state is `oom_killed: None`, never `False`, and never an OOM kill.
+- Precedence as in D-074: an agent cause anywhere wins. A correct `submit` followed by a flooded log is a `fail`; one followed by a harness-caused log failure is `replaced`.
+- `target_down` is a `fail` when the manifest's `target_health_start` is `healthy` (always true, since the harness refuses to start the loop on an unhealthy target); the other case is answered as `replaced` for completeness.
+- **A request the server rejected** (D-074's unclassified case) is a `harness_error` with no agent-cause note, so `outcome()` replaces it. That is a default, not a decision: if a content-triggered rejection is ever seen, classify it from the recorded request and reply, and add a rule here.
+- A model ending whose `score.json` is missing, malformed, has no boolean `pass` or carries `scorer_dirty_paths` (D-086's development score) is `unscored`, never a fail: the table does not decide it, phase 6 pre-registers its handling and its per-cell count.
+
+**Also:** `run.py`'s per-run summary now prints `outcome: ...`.
+
+**Not done:**
+- Runs made before this change have no cause notes. An old run whose attacker died is `replaced` whatever the cause was, and an old flooded-log run is `replaced`; classify them by hand from `docker inspect`, as D-075 says, if one matters.
+- `baseline/compare.py`'s model side still reads every run it is given by `events_chain` and `score.json` and does not filter on `outcome()`. It describes development runs; the pilot's and the study's tallies must go through `load_outcome`.
+- A wedged but still-running attacker (process or memory exhaustion that does not kill the container) is not detected, as D-075 says; so it gets no cause note.
+- The table's phase 6 pre-registration, a cap on replacements per cell, and the investigate-before-replace rule for a failure confined to one arm (D-074) are procedures for the runner and the analysis, not code in this entry.
+
+**Tests:** `tests/test_outcome.py` (the table over every ending and cause, the precedence rule, the closed ending list, the file reader), `tests/test_lab.py` (`attacker_state` over Docker's replies, including unreadable ones; `LogFloodError` is a `HarnessError` that keeps the size), `tests/test_run.py` (a dead attacker and a flooded log record their notes and classify; the summary shows the outcome).
+
+**Left as it was:** `scoring/`, `schemas/`, `prompts/`, the compose files and images.
+
+**Constrains:** every analysis of run results (read a run through `outcome()`, never through `score.json` alone); PLAN.md phase 6's pre-registration.

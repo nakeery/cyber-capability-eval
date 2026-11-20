@@ -55,6 +55,16 @@ class HarnessError(Exception):
     """A preflight, lifecycle or collection failure: the run ends as `harness_error` (D-064)."""
 
 
+class LogFloodError(HarnessError):
+    """The target's log went over MAX_LOG_BYTES: the agent flooded it (D-074's table: an agent-caused failure).
+    A subclass, so every existing handler still sees a HarnessError, and the run records `log_bytes` as a
+    structured note instead of leaving the cause only in message text (D-074 to-build item 2)."""
+
+    def __init__(self, message: str, log_bytes: int) -> None:
+        super().__init__(message)
+        self.log_bytes = log_bytes
+
+
 class Runner(Protocol):
     def __call__(self, argv: list[str], *, input: bytes | None = None, timeout: float = DOCKER_TIMEOUT_S,
                  stdout_to: Path | None = None) -> subprocess.CompletedProcess: ...
@@ -296,6 +306,20 @@ class Lab:
         done = self._docker("inspect", "--format", "{{.State.Running}}", self.attacker, check=False)
         return _text(done.stdout) == "true"
 
+    def attacker_state(self) -> dict:
+        """What Docker recorded about the attacker, as facts and no verdict (D-074 to-build item 2): `outcome()`
+        decides from these whether the agent caused the stop. `oom_killed` is None, not False, when Docker could
+        not be asked: an unreadable state must never look like a clean one."""
+        done = self._docker("inspect", "--format",
+                            "{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}} {{.State.FinishedAt}}",
+                            self.attacker, check=False)
+        parts = _text(done.stdout).split()
+        if done.returncode != 0 or len(parts) != 4 or parts[0] not in ("true", "false") \
+                or parts[1] not in ("true", "false") or not parts[2].lstrip("-").isdigit():
+            return {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}
+        return {"running": parts[0] == "true", "oom_killed": parts[1] == "true",
+                "exit_code": int(parts[2]), "finished_at": parts[3]}
+
     def wait_ready(self, timeout: float = READY_TIMEOUT_S) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -389,8 +413,8 @@ class Lab:
             done = self._docker("logs", self.target, timeout=300, stdout_to=scratch)
             size = scratch.stat().st_size
             if size > MAX_LOG_BYTES:
-                raise HarnessError(f"the target's log is {size // 2 ** 20} MiB, over the {MAX_LOG_BYTES // 2 ** 20} MiB limit: "
-                                   "the agent flooded it, and the run's events were not read")
+                raise LogFloodError(f"the target's log is {size // 2 ** 20} MiB, over the {MAX_LOG_BYTES // 2 ** 20} MiB limit: "
+                                    "the agent flooded it, and the run's events were not read", size)
             data = scratch.read_bytes()
         finally:
             scratch.unlink(missing_ok=True)

@@ -41,8 +41,9 @@ sys.path.insert(0, str(ROOT / "target"))
 
 from agent import INFERENCE_CONFIG, Limits, LoopResult, run_agent  # noqa: E402
 from execution import DockerExecutor  # noqa: E402
-from lab import HarnessError, Lab  # noqa: E402
+from lab import HarnessError, Lab, LogFloodError  # noqa: E402
 from model import ModelClient  # noqa: E402
+from outcome import load_outcome  # noqa: E402
 from local_model import ServerCheckError, verify_weights  # noqa: E402
 from prompt_set import Prompts, find_leaks, load_prompts  # noqa: E402
 from seed import validate_seed  # noqa: E402
@@ -211,6 +212,13 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
                 # the target, retried because a single refused connection from a busy single-threaded server
                 # is not an outage (D-065).
                 if not lab.attacker_running():
+                    # The facts Docker kept, recorded before the message is (D-074 to-build item 2): whether the
+                    # agent caused this is decided later, by outcome(), from OOMKilled and not from this text.
+                    try:
+                        notes["attacker_stopped"] = lab.attacker_state()
+                    except Exception as err:       # the record of a cause must never hide the failure itself
+                        notes["attacker_stopped"] = {"running": None, "oom_killed": None, "exit_code": None,
+                                                     "finished_at": None, "error": f"{type(err).__name__}: {err}"}
                     raise HarnessError("the attacker container is not running")
                 return lab.health(attempts=HEALTH_ATTEMPTS)
 
@@ -268,6 +276,8 @@ def _finish(lab: Lab, state: RunState, notes: dict, clock: Callable[[], datetime
             return action()
         except Exception as err:
             problems.append(f"{label}: {err}")
+            if isinstance(err, LogFloodError):
+                notes["log_flood"] = {"log_bytes": err.log_bytes}      # structured, for outcome() (D-074)
             return None
 
     if state.up:
@@ -419,6 +429,12 @@ def summarize(run_dir: Path) -> str:
             lines.append(f"  DEVELOPMENT SCORE: uncommitted scoring code in {', '.join(dirty)} (not study data)")
     if "score_error" in notes:
         lines.append(f"  not scored: {notes['score_error']}")
+    try:
+        verdict = load_outcome(run_dir)
+        lines.append(f"  outcome: {verdict.kind}" + (f" (pass={verdict.passed})" if verdict.passed is not None else "")
+                     + f" - {verdict.reason}")
+    except ValueError as err:       # an unknown ending is shown, never a reason for the summary to fail
+        lines.append(f"  outcome: unclassified - {err}")
     problems = notes.get("validation") or []
     lines.append("  validation: " + ("ok" if not problems else f"{len(problems)} problem(s)"))
     lines += [f"    - {p}" for p in problems[:10]]
