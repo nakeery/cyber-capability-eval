@@ -2067,3 +2067,28 @@ What R3's build does not do: the pilot's counting script that will call these fu
 **Left as it was:** `scoring/`, `schemas/`, `prompts/`, the compose files and images.
 
 **Constrains:** every analysis of run results (read a run through `outcome()`, never through `score.json` alone); PLAN.md phase 6's pre-registration.
+
+---
+
+## D-098: The pilot's tally script, and `baseline/compare.py`'s model side now reads a run through `outcome()`
+**Date:** 2026-11-20 · **Status:** built and tested; no design choice beyond what D-074, D-075, D-083, D-084 and D-097 already fixed · **Closes:** D-097's "not done" item on `baseline/compare.py`, and the counting script D-075 said was phase 5's · **Relates to:** D-062, D-063, D-074, D-075, D-083, D-084, D-097; the author's `pilot.ps1` (24 runs: 4 variants x 2 conditions x 3, all with `--order-seed 1`)
+
+**Decision.** `harness/pilot_tally.py` (`python harness/pilot_tally.py [--runs-dir] [--commit] [--since] [--order-seed]`) prints, per (variant, condition) cell, **counts only**: a pilot is a shakeout, not a floor test (PLAN.md phase 5), so the script has no rate comparison and no interval.
+
+- **The outcome of each run, from `load_outcome` (D-097), never from `score.json` alone:** runs that count (scored plus fail), how many of those the scorer passed, agent-caused failures (a subset of counted), replaced runs with their reasons, unscored runs, and any ending the outcome table does not know. A cell short of 3 counted runs is a finding ("replaced runs are drawn again", D-074).
+- **The phase 5 counts that need run data:** `context_limit` runs (D-062); runs that end text-only after a command, the primary count and the attempts-included count beside it, and runs that reach the nudge limit, all through `harness/step_kind.py` (D-075, D-083, D-084); nudges per run; the malformed-turn rate and its causes; replies cut at `max_tokens` (the temperature check, D-084); and how many `invalid_arguments` turns **strictness alone** causes (D-063's "harmless extra key"), defined as a single well-named call whose required argument is present and a string and which also carries extra keys, read from the recorded `raw_tool_use`.
+- **Per-cell scorer milestones** are counted over counted runs only, so a replaced run never contributes, however far it got (D-074).
+- **Findings, never averaged away:** a short cell; a run that does not validate (tallied, flagged; the scorer refuses it, D-057); a development run (the run's `dirty_paths`; not study data); an unclassified ending; and a **difference in the replaced count between the two conditions of one variant**, which is D-074's caveat (replacement is unbiased only if infrastructure failures are independent of the arm) turned into a printed line.
+- **Selection is explicit:** `--commit`, `--since` (needs a UTC offset) and `--order-seed` narrow the runs directory, and the count of directories not selected is printed. A run that never finished (only `manifest.partial.json`) has no `run_order_seed`, so `--order-seed` cannot exclude it; it is matched on commit and time like the rest and counted as replaced (D-074). Baseline directories are skipped. A pilot should be tallied with `--since` set to just before `pilot.ps1` started, so that development runs do not mix in.
+
+`baseline/compare.py`'s model side: a model row's `pass` is now the outcome's (`None` for a replaced or unscored run, `False` for an agent-caused failure), and `main` leaves replaced model runs out of the model table and lists them under "Left out" with their reason, as it already did for a baseline run.
+
+**Checked on the existing `runs/` directory** (262 development runs, all dates and commits; not study data): the script reads every one without an error. It shows what it is for: B + hint holds 233 directories, 95 `harness_error` and 14 `api_error` runs (the floor check's troubleshooting), so the replaced-count finding fires, and most B + hint runs are development runs (uncommitted changes). The runs before D-097 have no cause notes, as D-097 says.
+
+**Not done:** the script reads the run's own recorded facts only; it does not run the `trajectory-analyst` or take labels, and it does not say anything about the temperature beyond the two counts D-084 asks for. Labeler validation (hand labels against the analyst's) and the side-by-side with the sqlmap baseline stay phase 5's open items.
+
+**Tests:** `tests/test_pilot_tally.py` (24: the step counts, strictness alone, each cell count and finding, selection, and real directories made by `execute_run` against the fake lab), and two in `tests/test_compare.py`.
+
+**Left as it was:** `scoring/`, `schemas/`, `prompts/`, the compose files and images.
+
+**Constrains:** how the pilot's numbers are produced (`pilot_tally.py`, not a hand tally, and through `outcome()`).

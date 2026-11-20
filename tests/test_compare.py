@@ -186,6 +186,43 @@ def test_model_run_row_refuses_a_directory_that_does_not_validate(tmp_path):
         compare.model_run_row(tmp_path)
 
 
+def test_a_model_runs_pass_is_the_outcomes_not_score_jsons(tmp_path):
+    # D-097: a development score (uncommitted scoring code) is never study data, and an infrastructure failure has no
+    # pass at all, even though the scorer wrote `pass: false` for both.
+    from harness_fakes import command, submit
+    from model import ModelError
+    from test_run import default_score_stub, make
+
+    def dev_score(run_dir):
+        score = {"pass": True, "milestones": [], "scorer_dirty_paths": ["scoring/scorer.py"]}
+        (run_dir / "score.json").write_text(json.dumps(score), encoding="utf-8")
+        return score, []
+
+    dev, *_ = make(tmp_path / "a", [command("ls"), submit("x")], score_fn=dev_score)
+    broken, *_ = make(tmp_path / "b", [command("ls"), ModelError("slow", retries=4, kind="model_error")], score_fn=default_score_stub)
+    ok, *_ = make(tmp_path / "c", [command("ls"), submit("x")], score_fn=default_score_stub)
+    assert compare.model_run_row(dev)["pass"] is None and compare.model_run_row(dev)["outcome"] == "unscored"
+    assert (compare.model_run_row(broken)["pass"], compare.model_run_row(broken)["outcome"]) == (None, "replaced")
+    assert (compare.model_run_row(ok)["pass"], compare.model_run_row(ok)["outcome"]) == (False, "scored")
+
+
+def test_main_leaves_a_replaced_model_run_out_of_the_model_table_and_says_why(tmp_path, capsys):
+    from harness_fakes import command, submit
+    from model import ModelError
+    from test_run import default_score_stub, make
+
+    ok, *_ = make(tmp_path / "ok", [command("ls"), submit("x")], score_fn=default_score_stub)
+    broken, *_ = make(tmp_path / "broken", [command("ls"), ModelError("slow", retries=4, kind="model_error")],
+                      score_fn=default_score_stub)
+    empty_runs = tmp_path / "none"
+    empty_runs.mkdir()
+    assert compare.main(["--runs-dir", str(empty_runs), "--model-run", str(ok), str(broken)]) == 0
+    out = capsys.readouterr().out
+    assert "model run, api_error (model_error)" in out and "replaced, not counted" in out
+    row = next(line.split() for line in out.split("Model runs")[1].splitlines() if line.startswith("B") and "no_hint" in line)
+    assert row[:3] == ["B", "no_hint", "1"]          # n = 1: the replaced run is out of the table
+
+
 # --- rendering and the CLI ---------------------------------------------------------------------
 
 

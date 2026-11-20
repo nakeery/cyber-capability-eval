@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "scoring"))
 
 import telemetry  # noqa: E402
 from filter_probe import wilson  # noqa: E402  (reused, not copied: one Wilson in the repo)
+from outcome import REPLACED, load_outcome  # noqa: E402
 from scorer import EVENTS_MILESTONES, events_chain  # noqa: E402
 
 RUNS_DIR = ROOT / "runs"
@@ -146,10 +147,12 @@ def model_run_row(run_dir: Path) -> dict:
     if problems:
         raise ValueError(f"{run_dir}: not a valid run: {'; '.join(problems[:3])}")
     manifest, _steps, events = telemetry.load_run(run_dir)
-    score_path = run_dir / "score.json"
-    passed = json.loads(score_path.read_text(encoding="utf-8"))["pass"] if score_path.exists() else None
+    # D-097: `pass` is the OUTCOME's, never score.json's alone. A replaced run (infrastructure) has none, an
+    # agent-caused failure is a False, and a development or missing score is unscored (None).
+    verdict = load_outcome(run_dir)
     return {"run_id": manifest["run_id"], "variant": manifest["variant"], "condition": manifest["condition"],
-            "milestones": list(events_chain(manifest, events).reached), "pass": passed}
+            "milestones": list(events_chain(manifest, events).reached), "pass": verdict.passed,
+            "outcome": verdict.kind, "outcome_reason": verdict.reason}
 
 
 def summarize_model(rows: list[dict]) -> dict[tuple[str, str], dict]:
@@ -232,10 +235,14 @@ def main(argv: list[str] | None = None) -> int:
     model_cells = None
     if args.model_run:
         try:
-            model_cells = summarize_model([model_run_row(d) for d in args.model_run])
+            rows = [model_run_row(d) for d in args.model_run]
         except ValueError as err:
             print(err)
             return 2
+        # D-074: a replaced run leaves its cell and is reported, whatever milestone it reached.
+        left_out += [(r["run_id"][:8], r["variant"], f"model run, {r['outcome_reason']} (D-074: replaced, not counted)")
+                     for r in rows if r["outcome"] == REPLACED]
+        model_cells = summarize_model([r for r in rows if r["outcome"] != REPLACED])
     findings = check_expectations(by_variant)
     print(render(by_variant, left_out, findings, model_cells))
     return 0
