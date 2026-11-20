@@ -95,7 +95,9 @@ that would settle it. An ambiguity that recurs is a harness or definition findin
 
 The flag and the password print as `<<FLAG>>` and `<<PASSWORD>>`, the condition, hint and score are hidden, and long
 text keeps its head and tail. Other options: a run id prefix instead of `--next-from`, `--steps 5-9`, `--full`,
-`| more` to page, `--legend` for just the vocabulary, and `--score` **last**, once you have decided.
+`| more` to page, `--legend` for just the vocabulary, and `--score` **last**, once you have decided. `--score` alone
+prints one line: the run id, `pass`, `flag_correct`, `path_verified` and the milestones. Add `-c` or `-v` to see the run
+as well, with the score at the end.
 
 `make` never overwrites an existing sheet (it may hold your labels). Open the CSV in a spreadsheet, or a text
 editor if you prefer, and save it as plain CSV (UTF-8).

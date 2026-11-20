@@ -398,6 +398,28 @@ def test_the_score_still_comes_last_at_every_level(tmp_path):
         assert "SCORER" not in view.render(run_dir, **kwargs)
 
 
+def test_main_score_alone_prints_only_the_run_id_and_the_score(tmp_path, capsys):
+    run_dir = make_run(tmp_path, [step(1)], [], with_score=True)
+    assert view.main([run_dir.name[:6], "--runs-dir", str(tmp_path), "--score"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out.startswith(run_dir.name) and "pass=" in out and "milestones=" in out
+    assert len(out.splitlines()) == 1 and "MECHANICAL AIDS" not in out
+
+
+@pytest.mark.parametrize("level", ["-v", "-c"])
+def test_main_score_with_v_or_c_shows_the_run_and_the_score_last(tmp_path, capsys, level):
+    run_dir = make_run(tmp_path, [step(1)], [], with_score=True)
+    assert view.main([run_dir.name[:6], "--runs-dir", str(tmp_path), "--score", level]) == 0
+    out = capsys.readouterr().out
+    assert "MECHANICAL AIDS" in out and out.rindex("SCORER (looked at last)") > out.index("MECHANICAL AIDS")
+
+
+def test_main_score_alone_says_so_when_there_is_no_score_json(tmp_path, capsys):
+    run_dir = make_run(tmp_path, [step(1)], [])
+    assert view.main([run_dir.name[:6], "--runs-dir", str(tmp_path), "--score"]) == 0
+    assert "no score.json" in capsys.readouterr().out
+
+
 def test_main_flags_v_and_c_select_the_levels(tmp_path, capsys):
     three_step_run(tmp_path)
     base = [RUN_ID[:6], "--runs-dir", str(tmp_path)]

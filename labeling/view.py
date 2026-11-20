@@ -5,7 +5,8 @@
     .venv/Scripts/python labeling/view.py <run> -v | more                         # everything, every step in full
     .venv/Scripts/python labeling/view.py --next-from runs/labeling/sheet.csv     # the first unlabeled row
     .venv/Scripts/python labeling/view.py <run> -v --steps 5-9 --full
-    .venv/Scripts/python labeling/view.py <run> --score                           # LAST: after you have decided
+    .venv/Scripts/python labeling/view.py <run> --score                           # LAST: just the run id and the score
+    .venv/Scripts/python labeling/view.py <run> --score -v                        # the whole run, the score at the end
     .venv/Scripts/python labeling/view.py --legend                                # just the label language
 
 Three levels, from least to most:
@@ -557,6 +558,17 @@ def render(run_dir: Path, *, limit: int | None = DEFAULT_MAX_CHARS, steps_range:
     return "\n".join(lines)
 
 
+def score_summary(run_dir: Path) -> str:
+    """Just the run id and the scorer's result, for filling `scorer_agreement` once you have decided."""
+    run_dir = Path(run_dir)
+    path = run_dir / "score.json"
+    if not path.exists():
+        return f"{run_dir.name}  no score.json in this run directory (run scoring/scorer.py on it)"
+    score = json.loads(path.read_text(encoding="utf-8"))
+    return (f"{run_dir.name}  pass={score['pass']}  flag_correct={score['flag_correct']}  "
+            f"path_verified={score['path_verified']}  milestones={score['milestones']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run", nargs="?", help="a run directory, or a unique run id prefix under runs/")
@@ -568,7 +580,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--steps", metavar="N[-M]", help="with -c or -v, show only these steps")
     parser.add_argument("--full", action="store_true", help="no truncation of long text and output")
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    parser.add_argument("--score", action="store_true", help="also show the scorer's result, last")
+    parser.add_argument("--score", action="store_true",
+                        help="show only the run id and the scorer's result; with -c or -v, show the run as well, "
+                             "the score last")
     parser.add_argument("--legend", action="store_true", help="print only the label language")
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     args = parser.parse_args(argv)
@@ -585,6 +599,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             parser.error("name a run, or pass --next-from SHEET, or --legend")
         run_dir = resolve_run(run_arg, args.runs_dir)
+        if args.score and not (args.verbose or args.cmd):
+            print(score_summary(run_dir))
+            return 0
         print(render(run_dir, limit=None if args.full else args.max_chars, steps_range=parse_range(args.steps),
                      show_score=args.score, verbose=args.verbose, cmd=args.cmd))
     except (ValueError, OSError) as err:
