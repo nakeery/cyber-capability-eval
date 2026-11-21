@@ -12,7 +12,8 @@ A run directory under runs/<run_id>/ (gitignored: it holds the run's flag and pa
     target_events.jsonl   the target's events, from its own stopped container
     harness_notes.json    everything that has no schema: preflight results, leak-scan timing, sweeps,
                           termination detail, validation problems, development-run flags
-    score.json            the scorer's verdict, if the scoring code is committed and clean
+    score.json            the scorer's verdict, if the scoring code is committed and clean (or, with
+                          --allow-dirty, a development score that names the uncommitted paths, D-086)
 
 `execute_run` takes the lab, the model and the clock as arguments, so tests drive it with fakes.
 """
@@ -20,6 +21,7 @@ A run directory under runs/<run_id>/ (gitignored: it holds the run's flag and pa
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import secrets
@@ -39,8 +41,9 @@ sys.path.insert(0, str(ROOT / "target"))
 
 from agent import INFERENCE_CONFIG, Limits, LoopResult, run_agent  # noqa: E402
 from execution import DockerExecutor  # noqa: E402
-from lab import HarnessError, Lab  # noqa: E402
+from lab import HarnessError, Lab, LogFloodError  # noqa: E402
 from model import ModelClient  # noqa: E402
+from outcome import load_outcome  # noqa: E402
 from local_model import ServerCheckError, verify_weights  # noqa: E402
 from prompt_set import Prompts, find_leaks, load_prompts  # noqa: E402
 from seed import validate_seed  # noqa: E402
@@ -83,7 +86,7 @@ def git_provenance(root: Path = ROOT) -> tuple[str, list[str]]:
         # (" M path"), and a full strip() would eat it and cut a character off the first path.
         return done.stdout.rstrip("\n")
 
-    dirty = [line[3:] for line in git("status", "--porcelain", "--", *HARNESS_CODE).splitlines()]
+    dirty = [line[3:] for line in git("status", "--porcelain", "--untracked-files=all", "--", *HARNESS_CODE).splitlines()]
     return git("rev-parse", "HEAD").strip(), dirty
 
 
@@ -142,7 +145,10 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
                 clock: Callable[[], datetime], harness_commit: str, dirty_paths: list[str] = (),
                 order_seed: int = 0, executor_factory: Callable | None = None,
                 score_fn: Callable[[Path], tuple[dict, list[str]]] | None = None, seed: dict | None = None,
-                limits: Limits = Limits()) -> Path:
+                limits: Limits = Limits(), inference: dict = INFERENCE_CONFIG) -> Path:
+    """`inference` is the run's sampling: the manifest records it and the loop passes it to the model unchanged.
+    Production always uses INFERENCE_CONFIG; the parameter exists so a test of the Bedrock-labelled fake can use a
+    config Bedrock accepts (D-084: the production temperature is above Bedrock's range)."""
     run_id = lab.run_id
     seed = seed or new_seed(variant)
     run_dir = runs_dir / run_id
@@ -156,7 +162,8 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
     # The secrets reach disk before anything starts, so a killed run still leaves its flag behind.
     _write_json(run_dir / "manifest.partial.json", {
         "run_id": run_id, "variant": variant, "condition": condition, "harness_commit": harness_commit,
-        "flag": seed["flag"], "admin_password": seed["admin_password"], "begun_at": clock().isoformat()})
+        "flag": seed["flag"], "admin_password": seed["admin_password"], "begun_at": clock().isoformat(),
+        "run_order_seed": order_seed})       # so a run that never finishes can still be matched to its batch (D-098)
 
     steps_file = open(run_dir / "steps.jsonl", "a", encoding="utf-8", newline="\n")
 
@@ -206,6 +213,13 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
                 # the target, retried because a single refused connection from a busy single-threaded server
                 # is not an outage (D-065).
                 if not lab.attacker_running():
+                    # The facts Docker kept, recorded before the message is (D-074 to-build item 2): whether the
+                    # agent caused this is decided later, by outcome(), from OOMKilled and not from this text.
+                    try:
+                        notes["attacker_stopped"] = lab.attacker_state()
+                    except Exception as err:       # the record of a cause must never hide the failure itself
+                        notes["attacker_stopped"] = {"running": None, "oom_killed": None, "exit_code": None,
+                                                     "finished_at": None, "error": f"{type(err).__name__}: {err}"}
                     raise HarnessError("the attacker container is not running")
                 return lab.health(attempts=HEALTH_ATTEMPTS)
 
@@ -216,7 +230,7 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
                 model=model, executor=make_executor(lab), prompts=prompts, condition=condition, run_id=run_id,
                 secrets={"flag": seed["flag"], "admin_password": seed["admin_password"],
                          "secret_key": seed["secret_key"]},
-                inference=INFERENCE_CONFIG, limits=limits, clock=clock, health=health, on_step=write_step,
+                inference=inference, limits=limits, clock=clock, health=health, on_step=write_step,
                 result=state.loop)
         except (Exception, KeyboardInterrupt) as err:
             state.failed_at = clock()
@@ -237,10 +251,12 @@ def execute_run(*, variant: str, condition: str, lab: Lab, model: ModelClient, p
 
     _write_run(run_dir, state, notes, variant=variant, condition=condition, seed=seed, model=model,
                prompts=prompts, harness_commit=harness_commit, order_seed=order_seed, limits=limits,
-               run_id=run_id)
+               run_id=run_id, inference=inference)
     if score_fn is not None:
         try:
             score, score_notes = score_fn(run_dir)
+            # A snapshot from run time. Whether the score was a development score (D-086) is in score.json
+            # only, so a later rescore, which rewrites that file and not this one, can never leave two answers.
             notes["score"] = {"pass": score["pass"], "milestones": score["milestones"], "notes": score_notes}
         except Exception as err:
             notes["score_error"] = f"{type(err).__name__}: {err}"
@@ -261,6 +277,8 @@ def _finish(lab: Lab, state: RunState, notes: dict, clock: Callable[[], datetime
             return action()
         except Exception as err:
             problems.append(f"{label}: {err}")
+            if isinstance(err, LogFloodError):
+                notes["log_flood"] = {"log_bytes": err.log_bytes}      # structured, for outcome() (D-074)
             return None
 
     if state.up:
@@ -291,7 +309,7 @@ def _finish(lab: Lab, state: RunState, notes: dict, clock: Callable[[], datetime
 
 def _write_run(run_dir: Path, state: RunState, notes: dict, *, variant: str, condition: str, seed: dict,
                model: ModelClient, prompts: Prompts, harness_commit: str, order_seed: int, limits: Limits,
-               run_id: str) -> None:
+               run_id: str, inference: dict) -> None:
     loop = state.loop
     termination = loop.termination_reason if loop else "harness_error"
     detail = loop.detail if loop else None
@@ -315,7 +333,7 @@ def _write_run(run_dir: Path, state: RunState, notes: dict, *, variant: str, con
         "schema_version": "1", "run_id": run_id, "redacted": False, "variant": variant,
         "variant_config": dict(seed["variant_config"]), "condition": condition, "prompt_variant_id": "original",
         "backend": model.backend, "model_id": model.model_id,
-        "inference_config": dict(INFERENCE_CONFIG),
+        "inference_config": dict(inference),
         "system_prompt_hash": prompts.system_prompt_hash(condition), "hint_text": prompts.hint_text(condition),
         "step_cap": limits.step_cap, "image_digests": state.digests, "harness_commit": harness_commit,
         "docker_version": state.docker_version, "run_order_seed": order_seed,
@@ -365,10 +383,26 @@ def build_local_model(seed: int | None):
     return client, Limits(context_ceiling=pin.context_length - INFERENCE_CONFIG["max_tokens"])
 
 
-def default_score(run_dir: Path) -> tuple[dict, list[str]]:
+def default_score(run_dir: Path, *, allow_dirty: bool = False) -> tuple[dict, list[str]]:
+    """Score a finished run. Uncommitted scoring code refuses the score (D-057), unless `allow_dirty`
+    (the run's own --allow-dirty, D-086): then the score is made and records which scoring paths differed
+    from HEAD (`scorer_dirty_paths`), and is a development score, never study data."""
     sys.path.insert(0, str(ROOT / "scoring"))
-    from scorer import resolve_scorer_commit, score_run_dir
+    from scorer import resolve_scorer_commit, score_run_dir, scorer_provenance
+    if allow_dirty:
+        commit, dirty = scorer_provenance()
+        return score_run_dir(run_dir, commit, scorer_dirty_paths=dirty)
     return score_run_dir(run_dir, resolve_scorer_commit())
+
+
+def _scorer_dirty_paths(run_dir: Path) -> list[str]:
+    """The paths a development score names (D-086), read from score.json as it is NOW; [] for an ordinary
+    score, no score, or one that cannot be read (the validator reports that)."""
+    try:
+        recorded = json.loads((run_dir / "score.json").read_text(encoding="utf-8")).get("scorer_dirty_paths")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [str(path) for path in recorded] if isinstance(recorded, list) else []
 
 
 def summarize(run_dir: Path) -> str:
@@ -391,8 +425,17 @@ def summarize(run_dir: Path) -> str:
         lines.append(f"  detail: {notes['termination_detail']}")
     if "score" in notes:
         lines.append(f"  score: pass={notes['score']['pass']}, milestones={notes['score']['milestones']}")
+        dirty = _scorer_dirty_paths(run_dir)       # from score.json, the authority (D-086), not the run-time snapshot
+        if dirty:
+            lines.append(f"  DEVELOPMENT SCORE: uncommitted scoring code in {', '.join(dirty)} (not study data)")
     if "score_error" in notes:
         lines.append(f"  not scored: {notes['score_error']}")
+    try:
+        verdict = load_outcome(run_dir)
+        lines.append(f"  outcome: {verdict.kind}" + (f" (pass={verdict.passed})" if verdict.passed is not None else "")
+                     + f" - {verdict.reason}")
+    except ValueError as err:       # an unknown ending is shown, never a reason for the summary to fail
+        lines.append(f"  outcome: unclassified - {err}")
     problems = notes.get("validation") or []
     lines.append("  validation: " + ("ok" if not problems else f"{len(problems)} problem(s)"))
     lines += [f"    - {p}" for p in problems[:10]]
@@ -413,26 +456,29 @@ def summarize(run_dir: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("build")
+    build = sub.add_parser("build")
+    build.add_argument("--baseline", action="store_true",
+                       help="build the sqlmap baseline's images (D-089) instead of the agent's: the target and lab-baseline")
     sub.add_parser("sweep")
     run = sub.add_parser("run")
     run.add_argument("variant", choices=sorted(VARIANTS))
     run.add_argument("condition", choices=["no_hint", "hint"])
-    run.add_argument("--backend", choices=["bedrock", "local"], default="bedrock",
-                     help="local is the evaluated model after D-067; it needs harness/local_pin.json and a running llama-server")
+    run.add_argument("--backend", choices=["bedrock", "local"], default="local",
+                     help="local (the default) is the evaluated model after D-067; it needs harness/local_pin.json and a "
+                          "running llama-server. bedrock is refused while the study's temperature is above Bedrock's range (D-084)")
     run.add_argument("--model", choices=["micro", "pro"], default="micro", help="bedrock only: micro is the evaluated model of D-023")
     run.add_argument("--seed", type=int, default=None, help="local only: this run's sampling seed, recorded (default: random)")
     run.add_argument("--order-seed", type=int, default=0, help="the randomized block order's seed, recorded as run_order_seed")
     run.add_argument("--allow-dirty", action="store_true",
-                     help="run with uncommitted code (a DEVELOPMENT run: recorded in harness_notes.json, never study data)")
+                     help="run with uncommitted code (a DEVELOPMENT run: recorded in harness_notes.json, never study data); also lets the scorer score over uncommitted scoring code, recorded in score.json (D-086)")
     run.add_argument("--no-score", action="store_true")
     args = parser.parse_args(argv)
 
     try:
         with run_lock():
             if args.command == "build":
-                Lab("B", uuid.uuid4().hex).build_images()
-                print("images built")
+                Lab("B", uuid.uuid4().hex, baseline=args.baseline).build_images()
+                print("baseline images built" if args.baseline else "images built")
                 return 0
             if args.command == "sweep":
                 print("removed:", Lab("B", uuid.uuid4().hex).sweep())
@@ -450,13 +496,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.backend == "local":
                 model, limits = build_local_model(args.seed)
             else:
-                from model import bedrock_from_env
+                from model import BEDROCK_MAX_TEMPERATURE, bedrock_from_env
+                if INFERENCE_CONFIG["temperature"] > BEDROCK_MAX_TEMPERATURE:
+                    # Before any run directory exists: the manifest of such a run would not validate (the schema
+                    # caps a Bedrock run's temperature) and BedrockClient would refuse every call (D-084).
+                    raise HarnessError(
+                        f"the study's temperature ({INFERENCE_CONFIG['temperature']}) is above Bedrock's maximum "
+                        f"({BEDROCK_MAX_TEMPERATURE}); use --backend local (D-084)")
                 model = bedrock_from_env("NOVA_MICRO_MODEL_ID" if args.model == "micro" else "NOVA_PRO_MODEL_ID")
             run_dir = execute_run(
                 variant=args.variant, condition=args.condition, lab=Lab(args.variant, uuid.uuid4().hex),
                 model=model, prompts=load_prompts(), runs_dir=RUNS_DIR, clock=lambda: datetime.now(timezone.utc),
                 harness_commit=commit, dirty_paths=dirty, order_seed=args.order_seed, limits=limits,
-                score_fn=None if args.no_score else default_score)
+                score_fn=None if args.no_score else functools.partial(default_score, allow_dirty=args.allow_dirty))
             print(summarize(run_dir))
             return 0
     except HarnessError as err:

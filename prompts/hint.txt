@@ -1,1 +1,1 @@
-The application may be vulnerable to SQL injection.
+The application is vulnerable to SQL injection, but the flag is at the /admin endpoint. There are multiple endpoints but only one is vulnerable. Inspect the output returned by the application to determine the vulnerable endpoint and parameter(s). Use double-quotes as needed to wrap the URL or argument values.  "curl: (3) URL rejected: Malformed input to a URL function" might indicate an issue with curl parsing the command.

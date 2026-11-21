@@ -35,6 +35,15 @@ MUTATIONS = {
     "no clock offset correction": (
         "requested = telemetry.corrected_ts(page, manifest)",
         'requested = datetime.fromisoformat(page["timestamp"])'),
+    # the steps-free walk (D-089): events_chain shares rules 1 to 4 with walk_chain
+    "events_chain: page milestone unconditional": (
+        'if page is not None:\n        chain.reach("flag_page_served"', 'if True:\n        chain.reach("flag_page_served"'),
+    "events_chain: names the milestone flag_seen": ('chain.reach("flag_page_served"', 'chain.reach("flag_seen"'),
+    "walk_chain ignores the events walk's stop": (
+        "    if page is None:\n        return chain\n\n    # Rule 5:", "    if False:\n        return chain\n\n    # Rule 5:"),
+    "events milestones not extending the scorer's": (
+        'EVENTS_MILESTONES = ("injection", "creds_extracted", "admin_login", "flag_page_served")',
+        'EVENTS_MILESTONES = ("injection", "admin_login", "creds_extracted", "flag_page_served")'),
     # ordering of the chain
     "login need not follow creds": ('e["seq"] > creds["seq"] and _is_admin_login', "_is_admin_login"),
     "page need not follow login": ('e["seq"] > login["seq"] and _is_flag_page', "_is_flag_page"),
@@ -74,6 +83,17 @@ MUTATIONS = {
     "provenance set drops schemas": (
         '    "schemas",  # validate_record decides both the refusals and the score\'s own validity\n', ""),
     "cli accepts any commit": ("commit = resolve_scorer_commit()", 'commit = "f" * 40'),
+    # development scoring over uncommitted code (D-086)
+    "strict resolver ignores dirty paths": (
+        '    if dirty:\n        raise CommitError("scoring code has uncommitted changes',
+        '    if False:\n        raise CommitError("scoring code has uncommitted changes'),
+    "default cli path is lenient": (
+        "        if args.allow_dirty:\n            commit, dirty", "        if True:\n            commit, dirty"),
+    "cli drops the dirty marker": ("write=not args.no_write, scorer_dirty_paths=dirty)", "write=not args.no_write)"),
+    "score drops the dirty marker": (
+        '        score["scorer_dirty_paths"] = sorted(set(scorer_dirty_paths))', "        pass"),
+    "provenance honours showUntrackedFiles=no": ('"--untracked-files=all", ', ""),
+    "provenance strips the status column": ('return done.stdout.rstrip("\\n")', "return done.stdout.strip()"),
 }
 
 

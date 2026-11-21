@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from harness_fakes import FakeClock, FakeModel, command, submit
+from harness_fakes import BEDROCK_INFERENCE, FakeClock, FakeModel, command, submit
 from lab import Lab
 from prompt_set import load_prompts
 from run import UNKNOWN_DIGEST, execute_run
@@ -20,7 +20,12 @@ from scorer import score_run_dir
 from telemetry import clock_drift_ms, validate_run_dir
 from test_lab_docker import _docker_ready
 
-pytestmark = pytest.mark.skipif(not _docker_ready(), reason="needs Docker and the built lab images (run.py build)")
+# The skip comes first, so a module that cannot run takes no lock. `lab_lock` (conftest.py, D-087) holds the harness's
+# own lock for the module: a CLI run or sweep during these tests fails fast, and so do these tests during a run.
+pytestmark = [
+    pytest.mark.skipif(not _docker_ready(), reason="needs Docker and the built lab images (run.py build)"),
+    pytest.mark.usefixtures("lab_lock"),
+]
 
 COMMIT = "b" * 40
 SCRIPT = [
@@ -40,7 +45,8 @@ def test_a_scripted_run_against_the_real_lab_leaves_a_valid_scored_record(tmp_pa
     model = FakeModel(list(SCRIPT), FakeClock())
     run_dir = execute_run(
         variant=variant, condition="no_hint", lab=lab, model=model, prompts=load_prompts(), runs_dir=tmp_path,
-        clock=real_clock, harness_commit=COMMIT, order_seed=1, score_fn=lambda d: score_run_dir(d, COMMIT))
+        clock=real_clock, harness_commit=COMMIT, order_seed=1, score_fn=lambda d: score_run_dir(d, COMMIT),
+        inference=BEDROCK_INFERENCE)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     notes = json.loads((run_dir / "harness_notes.json").read_text(encoding="utf-8"))
     events = [json.loads(line) for line in (run_dir / "target_events.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -80,12 +86,14 @@ def test_a_scripted_run_against_the_real_lab_leaves_a_valid_scored_record(tmp_pa
 
 def test_a_second_run_starts_from_a_verified_clean_state(tmp_path):
     first = execute_run(variant="B", condition="no_hint", lab=Lab("B", uuid.uuid4().hex), model=FakeModel(list(SCRIPT), FakeClock()),
-                        prompts=load_prompts(), runs_dir=tmp_path, clock=real_clock, harness_commit=COMMIT)
+                        prompts=load_prompts(), runs_dir=tmp_path, clock=real_clock, harness_commit=COMMIT,
+                        inference=BEDROCK_INFERENCE)
     second_lab = Lab("B", uuid.uuid4().hex)
     # Before the second run's `up`: nothing of the first is left (PLAN.md phase 4 done-when).
     assert not any(second_lab.leftovers().values())
     second = execute_run(variant="B", condition="hint", lab=second_lab, model=FakeModel(list(SCRIPT), FakeClock()),
-                         prompts=load_prompts(), runs_dir=tmp_path, clock=real_clock, harness_commit=COMMIT)
+                         prompts=load_prompts(), runs_dir=tmp_path, clock=real_clock, harness_commit=COMMIT,
+                        inference=BEDROCK_INFERENCE)
     notes = json.loads((second / "harness_notes.json").read_text(encoding="utf-8"))
     assert notes["fresh_state"] == {"items": 6, "users": 5, "admin": "admin"} and notes["swept"] == {"containers": 0, "networks": 0, "volumes": 0}
     assert validate_run_dir(first, include_score=False) == [] and validate_run_dir(second, include_score=False) == []

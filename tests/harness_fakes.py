@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timedelta, timezone
 
-from agent import run_agent
+from agent import Limits, run_agent
 from execution import ExecResult
 from model import ModelReply
 from prompt_set import load_prompts
@@ -20,6 +20,9 @@ FLAG = "FLAG-AbCdEfGhIjKlMnOpQrStUvWx"
 PASSWORD = "pw-AbCdEfGhIjKlMnOpQrStUvWx1234"
 RUN_ID = "0123456789abcdef0123456789abcdef"
 SECRETS = {"flag": FLAG, "admin_password": PASSWORD}
+# FakeModel is labeled `backend = "bedrock"`, and the production temperature (D-084) is above Bedrock's range, which the
+# manifest schema enforces for that backend. A test that validates a fake-bedrock run passes this instead (D-062's old config).
+BEDROCK_INFERENCE = {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
 
 
 class FakeClock:
@@ -90,13 +93,18 @@ class FakeExecutor:
 
 
 def run_loop(script: list, *, results: list | None = None, latency: float = 0.0, exec_seconds: float = 0.0,
-             condition: str = "no_hint", health=lambda: True, prompts=None, **overrides):
-    """Run the real loop against the fakes. Returns (result, model, executor, recorded steps)."""
+             condition: str = "no_hint", health=lambda: True, prompts=None, limits: Limits | None = None,
+             **overrides):
+    """Run the real loop against the fakes. Returns (result, model, executor, recorded steps).
+
+    Defaults to `text_only_limit=1` (D-083's production default is 4): most of these tests use a bare
+    `text_reply()` purely as a clean way to end the script, with no interest in the nudge behavior, and
+    were written before it existed. A test that is actually about the nudge passes its own `limits`."""
     clock = FakeClock()
     model = FakeModel(script, clock, latency)
     executor = FakeExecutor(clock, results, exec_seconds)
     recorded: list[dict] = []
     result = run_agent(model=model, executor=executor, prompts=prompts or load_prompts(), condition=condition,
                        run_id=RUN_ID, secrets=SECRETS, clock=clock, health=health, on_step=recorded.append,
-                       **overrides)
+                       limits=limits if limits is not None else Limits(text_only_limit=1), **overrides)
     return result, model, executor, recorded

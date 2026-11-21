@@ -1,4 +1,16 @@
-# Optional phase 4b dependencies. Kept separate so the harness can never
-# import PyRIT by accident (DECISIONS.md D-009, D-017).
+# Optional phase 4b dependencies. Kept separate so the harness can never import PyRIT by accident
+# (DECISIONS.md D-009). pyrit==1.1.0 was the original pin (D-017); D-082 supersedes it with 1.2.1,
+# the version actually installed and exercised by drafts/pyrit_quick_test.py on 2026-11-18.
+#
+# pyrit 1.2.1 requires jsonschema>=4.25.1, which conflicts with this project's jsonschema==4.23.0 pin
+# (requirements.txt). Installing this into the SAME environment as requirements.txt silently upgrades
+# jsonschema and breaks four real-Docker tests (confirmed 2026-11-18; see D-082). Safer: a separate venv.
+# If installed alongside the main environment anyway, immediately re-pin jsonschema back down:
+#
+#   .venv/Scripts/python -m pip install -r requirements-pyrit.txt
+#   .venv/Scripts/python -m pip install jsonschema==4.23.0
+#
+# pyrit's own declared jsonschema requirement is then left unsatisfied by pip's own account, but the one
+# script that uses it (drafts/pyrit_quick_test.py) has been checked and still works under 4.23.0.
 -r requirements.txt
-pyrit==1.1.0
+pyrit==1.2.1

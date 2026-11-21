@@ -35,11 +35,14 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "harness"))
 
-from agent import INFERENCE_CONFIG  # noqa: E402  (production sampling: one definition, so it cannot drift)
 from model import ModelClient, ModelError, bedrock_from_env  # noqa: E402
 from prompt_set import CONDITIONS, Prompts, load_prompts  # noqa: E402
 
 BLOCKED = "content_filtered"
+# The sampling D-065's measurement (22 of 30 and 30 of 30 first turns blocked) was made at: D-062's. It is NOT
+# the production config any more (D-084 raised the temperature, which Bedrock cannot accept), so it is fixed
+# here, and a rerun reproduces that measurement instead of silently measuring something else.
+PROBE_INFERENCE = {"temperature": 0.7, "top_p": 0.9, "max_tokens": 1024}
 MODEL_KEYS = {"micro": "NOVA_MICRO_MODEL_ID", "pro": "NOVA_PRO_MODEL_ID"}
 # US dollars per million tokens (input, output), from AWS blog posts, NOT the pricing page (DECISIONS.md D-016
 # agrees with them). Only for the printed estimate; check the pricing page before budgeting on it.
@@ -81,7 +84,7 @@ def probe_once(client: ModelClient, prompts: Prompts, condition: str) -> dict:
         reply = client.converse(
             system=prompts.system_text(condition),
             messages=[{"role": "user", "content": [{"text": prompts.opening}]}],
-            tool_config=prompts.tool_config, inference=INFERENCE_CONFIG)
+            tool_config=prompts.tool_config, inference=PROBE_INFERENCE)
     except ModelError as err:
         # An error is neither a block nor a pass. It is counted on its own and never in either denominator.
         return {**row, "stop_reason": None, "error_kind": err.kind, "retries": err.retries,

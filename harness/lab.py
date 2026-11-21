@@ -42,6 +42,8 @@ RUN_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")     # a uuid4's hex form, the sam
 PROJECT_PREFIX = "lab-"
 PROJECT_LABEL = "com.docker.compose.project"
 BASE_FILE, D_FILE = ROOT / "docker-compose.yml", ROOT / "docker-compose.d.yml"
+BASELINE_FILE = ROOT / "docker-compose.baseline.yml"    # D-089: swaps the attacker's image for the sqlmap baseline's
+ATTACKER_IMAGE, BASELINE_IMAGE = "lab-attacker:dev", "lab-baseline:dev"
 TARGET_UID = "10001"
 READY_TIMEOUT_S = 30
 MIN_FREE_BYTES = 1024 ** 3            # D-042: the log has no rotation, so a nearly full disk ends a run badly
@@ -51,6 +53,16 @@ DOCKER_TIMEOUT_S = 180
 
 class HarnessError(Exception):
     """A preflight, lifecycle or collection failure: the run ends as `harness_error` (D-064)."""
+
+
+class LogFloodError(HarnessError):
+    """The target's log went over MAX_LOG_BYTES: the agent flooded it (D-074's table: an agent-caused failure).
+    A subclass, so every existing handler still sees a HarnessError, and the run records `log_bytes` as a
+    structured note instead of leaving the cause only in message text (D-074 to-build item 2)."""
+
+    def __init__(self, message: str, log_bytes: int) -> None:
+        super().__init__(message)
+        self.log_bytes = log_bytes
 
 
 class Runner(Protocol):
@@ -85,9 +97,11 @@ def is_lab_project(name: str) -> bool:
     return name.startswith(PROJECT_PREFIX) or name == "lab"
 
 
-def compose_files(variant: str) -> list[Path]:
-    """An allow-list: the base file, plus the D override for variant D and nothing else."""
-    return [BASE_FILE, D_FILE] if variant == "D" else [BASE_FILE]
+def compose_files(variant: str, baseline: bool = False) -> list[Path]:
+    """An allow-list: the base file, the D override for variant D, and the baseline override for a
+    baseline run (D-089), in that order, and nothing else."""
+    files = [BASE_FILE, D_FILE] if variant == "D" else [BASE_FILE]
+    return files + [BASELINE_FILE] if baseline else files
 
 
 def parse_labels(text: str) -> dict[str, str]:
@@ -106,11 +120,18 @@ class Lab:
     run_id: str
     runner: Runner = run_docker
     work_dir: Path | None = None    # where the target's log is written while it is read; run.py sets the run's directory
+    baseline: bool = False          # D-089: the attacker service runs the sqlmap baseline's image, not the agent's
 
     def __post_init__(self) -> None:
         self.project = project_name(self.run_id)
         self.attacker = f"{self.project}-attacker-1"
         self.target = f"{self.project}-target-1"
+
+    @property
+    def attacker_image(self) -> str:
+        """The image the attacker service must run: derived from `baseline` on every read, so a Lab whose flag
+        is changed afterwards cannot keep expecting the other image (D-091)."""
+        return BASELINE_IMAGE if self.baseline else ATTACKER_IMAGE
 
     # --- plumbing -------------------------------------------------------------------------
 
@@ -124,7 +145,7 @@ class Lab:
         return done
 
     def _compose(self, *args: str, check: bool = True, timeout: float = DOCKER_TIMEOUT_S):
-        files = [part for path in compose_files(self.variant) for part in ("-f", str(path))]
+        files = [part for path in compose_files(self.variant, self.baseline) for part in ("-f", str(path))]
         return self._docker("compose", "-p", self.project, *files, *args, check=check, timeout=timeout)
 
     def _exec(self, container: str, *args: str, user: str | None = None, input: bytes | None = None,
@@ -229,7 +250,7 @@ class Lab:
 
     def preflight(self) -> dict:
         """Every preflight check; raises one HarnessError naming every failure. Returns a report."""
-        problems = check_compose_config(self.compose_config(), self.variant)
+        problems = check_compose_config(self.compose_config(), self.variant, attacker_image=self.attacker_image)
         gateway, isolated, internal = self.network_facts()
         if not isolated:
             problems.append("the lab network was not created in isolated-gateway mode (D-066)")
@@ -238,7 +259,8 @@ class Lab:
         inspected: dict = {}
         for service, container in (("attacker", self.attacker), ("target", self.target)):
             inspected[service] = self._inspect(container)
-            problems += check_live_container(inspected[service], service, self.variant, self.project)
+            problems += check_live_container(inspected[service], service, self.variant, self.project,
+                                             expected_image=self.attacker_image if service == "attacker" else None)
         probe = (ROOT / "harness" / "network_probe.py").read_bytes()
         done = self._exec(self.attacker, "python3", "-", gateway or "", user="agent", input=probe,
                           check=False, timeout=180)
@@ -248,7 +270,7 @@ class Lab:
             report = None
             problems.append(f"network probe: no JSON report (exit {done.returncode}): {_text(done.stderr)[:200]}")
         if report is not None:
-            problems += evaluate_probe(report, gateway, isolated)
+            problems += evaluate_probe(report, gateway, isolated, sqlmap_expected=self.baseline)
             problems += check_agent_isolated_from_main(inspected["attacker"], report)
         if problems:
             raise HarnessError("preflight failed: " + "; ".join(problems))
@@ -283,6 +305,20 @@ class Lab:
     def attacker_running(self) -> bool:
         done = self._docker("inspect", "--format", "{{.State.Running}}", self.attacker, check=False)
         return _text(done.stdout) == "true"
+
+    def attacker_state(self) -> dict:
+        """What Docker recorded about the attacker, as facts and no verdict (D-074 to-build item 2): `outcome()`
+        decides from these whether the agent caused the stop. `oom_killed` is None, not False, when Docker could
+        not be asked: an unreadable state must never look like a clean one."""
+        done = self._docker("inspect", "--format",
+                            "{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}} {{.State.FinishedAt}}",
+                            self.attacker, check=False)
+        parts = _text(done.stdout).split()
+        if done.returncode != 0 or len(parts) != 4 or parts[0] not in ("true", "false") \
+                or parts[1] not in ("true", "false") or not parts[2].lstrip("-").isdigit():
+            return {"running": None, "oom_killed": None, "exit_code": None, "finished_at": None}
+        return {"running": parts[0] == "true", "oom_killed": parts[1] == "true",
+                "exit_code": int(parts[2]), "finished_at": parts[3]}
 
     def wait_ready(self, timeout: float = READY_TIMEOUT_S) -> None:
         deadline = time.monotonic() + timeout
@@ -377,8 +413,8 @@ class Lab:
             done = self._docker("logs", self.target, timeout=300, stdout_to=scratch)
             size = scratch.stat().st_size
             if size > MAX_LOG_BYTES:
-                raise HarnessError(f"the target's log is {size // 2 ** 20} MiB, over the {MAX_LOG_BYTES // 2 ** 20} MiB limit: "
-                                   "the agent flooded it, and the run's events were not read")
+                raise LogFloodError(f"the target's log is {size // 2 ** 20} MiB, over the {MAX_LOG_BYTES // 2 ** 20} MiB limit: "
+                                    "the agent flooded it, and the run's events were not read", size)
             data = scratch.read_bytes()
         finally:
             scratch.unlink(missing_ok=True)

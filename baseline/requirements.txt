@@ -1,0 +1,5 @@
+# The one dependency of the baseline image (D-089), pinned by version AND by the sha256 of the wheel from
+# PyPI (sqlmap.org's own release, 898 files, no dependencies), so the build refuses anything else.
+# To update: `pip download sqlmap==<version> --no-deps`, hash the file, replace both lines, and record why.
+sqlmap==1.10.11 \
+    --hash=sha256:223a0dda06eadb8eb8a06d2e9ef90281919fdc2203d9cf5979da3311d6af440a

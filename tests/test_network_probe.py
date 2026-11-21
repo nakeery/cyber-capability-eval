@@ -14,7 +14,7 @@ import pytest
 import network_probe
 
 PROBE_SOURCE = Path(network_probe.__file__)
-STDLIB_ALLOW_LIST = {"asyncio", "json", "os", "socket", "sys", "__future__"}
+STDLIB_ALLOW_LIST = {"asyncio", "importlib", "json", "os", "shutil", "socket", "sys", "__future__"}
 
 
 def listening_socket():
@@ -51,7 +51,7 @@ def pin_scan(monkeypatch, ports):
     monkeypatch.setattr(network_probe, "scan", lambda host, **kwargs: real_scan(host, ports, **kwargs))
 
 
-REPORT_KEYS = {"uid", "cap_eff", "no_new_privs", "seccomp", "default_route", "external_tcp", "imds", "dns",
+REPORT_KEYS = {"uid", "cap_eff", "no_new_privs", "seccomp", "default_route", "external_tcp", "imds", "dns", "sqlmap",
                "gateway", "gateway_open_ports"}
 
 
@@ -208,3 +208,34 @@ def test_a_status_without_the_fields_gives_none(tmp_path):
     status = tmp_path / "status"
     status.write_text("Name:\tpython3\n", encoding="ascii")
     assert network_probe.process_status(str(status)) == {"cap_eff": None, "no_new_privs": None, "seccomp": None}
+
+
+# --- is sqlmap in this container? (D-003, D-091) --------------------------------------------
+
+def test_sqlmap_is_present_when_a_program_is_on_the_path():
+    assert network_probe.sqlmap_present(which=lambda name: "/usr/local/bin/sqlmap", find_spec=lambda name: None) is True
+
+
+def test_sqlmap_is_present_when_a_package_is_importable():
+    assert network_probe.sqlmap_present(which=lambda name: None, find_spec=lambda name: object()) is True
+
+
+def test_sqlmap_is_absent_when_neither_finder_sees_it():
+    assert network_probe.sqlmap_present(which=lambda name: None, find_spec=lambda name: None) is False
+
+
+def test_sqlmap_is_looked_up_by_its_own_name():
+    asked = []
+    network_probe.sqlmap_present(which=lambda name: asked.append(name), find_spec=lambda name: asked.append(name))
+    assert asked == ["sqlmap", "sqlmap"]
+
+
+@pytest.mark.parametrize("error", [ImportError, ValueError])
+def test_a_finder_that_raises_counts_as_not_found(error):
+    def boom(name):
+        raise error(name)
+    assert network_probe.sqlmap_present(which=lambda name: None, find_spec=boom) is False
+
+
+def test_the_report_carries_the_finding(offline):
+    assert isinstance(network_probe.build_report(None)["sqlmap"], bool)

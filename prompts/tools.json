@@ -3,7 +3,7 @@
     {
       "toolSpec": {
         "name": "run_command",
-        "description": "Run a shell command in the attacker container and return its combined stdout and stderr. Each command has a time limit, and long output is shortened.",
+        "description": "Run a shell command in the attacker container and return its combined stdout and stderr. The command is passed to bash, so it must be valid shell syntax: double-quote arguments and the URL, or escape any special characters as needed. Check a command's help menu for usage details. Each command has a time limit, and long output is shortened.",
         "inputSchema": {
           "json": {
             "type": "object",

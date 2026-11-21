@@ -20,8 +20,10 @@ What it asks, from the agent's own position (same user, same network):
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
+import shutil
 import socket
 import sys
 
@@ -112,6 +114,17 @@ def process_status(path: str = "/proc/self/status") -> dict:
     return found
 
 
+def sqlmap_present(which=shutil.which, find_spec=importlib.util.find_spec) -> bool:
+    """Is sqlmap in this container, as a program on PATH or an importable package? (D-003, D-091.)
+    The agent's image must never have it and the baseline's must, so the harness requires each answer
+    on every run and a mix-up of the two images cannot pass on a name alone. The finders are
+    parameters so a test can answer without installing anything."""
+    try:
+        return which("sqlmap") is not None or find_spec("sqlmap") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def build_report(gateway: str | None) -> dict:
     return {
         "uid": os.getuid() if hasattr(os, "getuid") else None,
@@ -120,6 +133,7 @@ def build_report(gateway: str | None) -> dict:
         "external_tcp": {f"{h}:{p}": tcp_connects(h, p) for h, p in EXTERNAL_TCP},
         "imds": tcp_connects(*IMDS),
         "dns": resolves(EXTERNAL_NAME),
+        "sqlmap": sqlmap_present(),
         "gateway": gateway,
         "gateway_open_ports": scan(gateway) if gateway else None,
     }

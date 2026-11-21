@@ -4,3 +4,12 @@
 boto3==1.44.1
 pytest==9.2.0
 jsonschema==4.23.0
+
+# drafts/pyrit_quick_test.py needs pyrit, pinned separately in requirements-pyrit.txt, NOT here: pyrit 1.2.1
+# requires jsonschema>=4.25.1, which silently upgrades the jsonschema pin above when installed into the
+# same environment and breaks 4 real-Docker tests that depend on this project's exact validation behavior
+# (confirmed 2026-11-18: installing it bumped jsonschema to 4.26.0 and broke
+# tests/test_lab_docker.py::test_the_exit_code_and_combined_streams_come_back plus three tests in
+# tests/test_run_docker.py; reverting jsonschema to 4.23.0 fixed all four, with pyrit left installed and
+# still working for the one script that uses it). Install requirements-pyrit.txt in a SEPARATE venv, or
+# accept that it will downgrade pyrit's own jsonschema dependency below what it declares.

@@ -35,6 +35,10 @@
     "raw_tool_use": {
       "description": "The tool-call block or blocks exactly as received, any JSON (D-063). Required with tool_call_error and forbidden without it, so a malformed call stays inspectable while the strict tool_input rules below keep guarding every well-formed one."
     },
+    "nudged": {
+      "const": true,
+      "description": "Present and true only on a text-only turn (no tool_call_error) that the loop answered with the fixed continue-nudge instead of ending the run (D-083). Absent means no nudge was sent: either the turn was not text-only, or it was the one that ended the run."
+    },
     "raw_stop_reason": {
       "type": "string",
       "minLength": 1,
@@ -101,10 +105,10 @@
       }
     },
     {
-      "description": "A text-only turn (no tool_call_error) ran no tool, so it has no input or output.",
+      "description": "A text-only turn (no tool_call_error, not nudged) that ENDED the run ran no tool, so it has no input or output. A nudged one (D-083) is the separate rule just below.",
       "if": {
         "properties": { "tool_name": { "const": null } },
-        "not": { "required": ["tool_call_error"] }
+        "not": { "anyOf": [{ "required": ["tool_call_error"] }, { "required": ["nudged"] }] }
       },
       "then": {
         "properties": {
@@ -112,6 +116,20 @@
           "output_full": { "type": "null" },
           "output_sent_to_model": { "type": "null" },
           "exit_code": { "type": "null" }
+        }
+      }
+    },
+    {
+      "description": "A nudged text-only turn (D-083) ran no tool either, but the run continues: output_sent_to_model holds the fixed continue-nudge the model was shown, so everything the model saw still appears verbatim in a step, the same invariant the malformed-turn rule below keeps.",
+      "if": { "required": ["nudged"] },
+      "then": {
+        "properties": {
+          "tool_input": { "type": "null" },
+          "output_full": { "type": "null" },
+          "output_sent_to_model": { "type": "string", "minLength": 1 },
+          "exit_code": { "type": "null" },
+          "truncated": { "const": false },
+          "timed_out": { "const": false }
         }
       }
     },

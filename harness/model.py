@@ -70,6 +70,12 @@ def classify_error(err: Exception) -> str:
     return SERVICE
 
 
+# Converse's documented temperature range for the Nova models is 0 to 1. The study's sampling (D-084) is
+# above it, so a Bedrock call would be refused by the service with a ValidationException; the client says
+# so itself, first, in the harness's own words.
+BEDROCK_MAX_TEMPERATURE = 1.0
+
+
 class ModelClient(Protocol):
     backend: str
     model_id: str
@@ -100,6 +106,12 @@ class BedrockClient:
     def converse(self, *, system: str, messages: list[dict], tool_config: dict, inference: dict) -> ModelReply:
         from botocore.exceptions import BotoCoreError, ClientError
 
+        if inference["temperature"] > BEDROCK_MAX_TEMPERATURE:
+            # A harness configuration problem, not an API fault: REQUEST_REJECTED, the same kind Converse's
+            # own ValidationException gets, so the run ends as harness_error and is investigated (D-065).
+            raise ModelError(
+                f"temperature {inference['temperature']} is above Bedrock's maximum of {BEDROCK_MAX_TEMPERATURE} "
+                "(D-084); no call was made", kind=REQUEST_REJECTED)
         self._attempts = 0
         try:
             response = self.client.converse(
