@@ -119,7 +119,7 @@ def read_run(run_dir: Path) -> dict | None:
     facts["milestones"] = list(score.get("milestones") or []) if verdict_counts(facts["outcome"]) else []
     try:
         facts["problems"] = telemetry.validate_run_dir(run_dir, include_score=False)
-        steps = telemetry.load_run(run_dir)[1]
+        steps = telemetry._read_jsonl(run_dir / "steps.jsonl")  # just the steps: no need to re-parse manifest/events too
         facts.update(step_facts(steps, facts["termination"]))
     except (OSError, ValueError) as err:
         facts["problems"] = facts["problems"] or [f"unreadable: {err}"]
@@ -160,20 +160,35 @@ def selected(facts: dict, *, commit: str | None, since: datetime | None, order_s
     return True
 
 
+def looks_like_a_run(run_dir: Path) -> bool:
+    """True when a directory was clearly meant to be a model run (it has a manifest or a partial one) but
+    `read_run` still returned None for it -- a damaged directory, not an ordinary one to skip quietly
+    (a baseline directory, `labeling/`, or anything else with no manifest at all)."""
+    run_dir = Path(run_dir)
+    return not (run_dir / "baseline_result.json").exists() and (
+        (run_dir / "manifest.json").exists() or (run_dir / "manifest.partial.json").exists())
+
+
 def load_pilot(runs_dir: Path, *, commit: str | None = None, since: datetime | None = None,
-               order_seed: int | None = None) -> tuple[list[dict], int]:
-    """(the selected runs, the number of run directories that were not selected). Oldest first."""
-    chosen, skipped = [], 0
+               order_seed: int | None = None) -> tuple[list[dict], int, list[str]]:
+    """(the selected runs, the number of run directories that were not selected, the damaged ones among
+    those -- a manifest or partial manifest that exists but `read_run` could not use). Oldest first."""
+    chosen, skipped, damaged = [], 0, []
     for run_dir in sorted(Path(runs_dir).iterdir()) if Path(runs_dir).is_dir() else []:
         if not run_dir.is_dir():
             continue
         facts = read_run(run_dir)
-        if facts is None or not selected(facts, commit=commit, since=since, order_seed=order_seed):
+        if facts is None:
+            if looks_like_a_run(run_dir):
+                damaged.append(run_dir.name)
+            skipped += 1
+            continue
+        if not selected(facts, commit=commit, since=since, order_seed=order_seed):
             skipped += 1
             continue
         chosen.append(facts)
     chosen.sort(key=lambda f: str(f["started_at"]))
-    return chosen, skipped
+    return chosen, skipped, damaged
 
 
 # --- one cell, and the cells ---------------------------------------------------------------------
@@ -193,6 +208,7 @@ def tally_cell(runs: list[dict]) -> dict:
         "unscored": sum(1 for r in runs if r["outcome"] == UNSCORED),
         "unclassified": sum(1 for r in runs if r["outcome"] == UNCLASSIFIED),
         "termination": Counter(r["termination"] for r in runs),
+        "commits": Counter(r.get("commit") for r in runs),
         "context_limit_runs": sum(1 for r in runs if r["termination"] == "context_limit"),
         "milestones": Counter(m for r in counted for m in r.get("milestones", [])),
         "not_valid": [r["run_id"][:8] for r in runs if r["problems"]],
@@ -244,6 +260,15 @@ def findings(cells: dict[tuple[str, str], dict]) -> list[str]:
         if len(set(counts.values())) > 1 and len(counts) > 1:
             out.append(f"{variant}: replaced runs differ between conditions {counts}: investigate before absorbing "
                        f"(D-074's caveat: replacement assumes failures independent of the arm)")
+    # Mirrors baseline/compare.py's own commit-span note: a batch is comparable across its cells only if
+    # one harness commit made all of it; --commit narrows to one deliberately, so this only fires without it.
+    full_commits = sum((c["commits"] for c in cells.values()), Counter())
+    short_commits = Counter()
+    for commit, n in full_commits.items():
+        short_commits[str(commit)[:7] if commit else "(none)"] += n
+    if len(short_commits) > 1:
+        out.append(f"this batch spans {len(short_commits)} harness commits {dict(short_commits)}: pass --commit "
+                   f"to keep one, or treat the mix as a finding of its own")
     return out
 
 
@@ -254,9 +279,13 @@ def _ratio(k: int, n: int) -> str:
     return f"{k}/{n}"
 
 
-def render(cells: dict[tuple[str, str], dict], skipped: int, notes: list[str]) -> str:
+def render(cells: dict[tuple[str, str], dict], skipped: int, notes: list[str], damaged: list[str] = ()) -> str:
     lines = [f"Pilot tally. COUNTS only (a pilot is a shakeout, not a floor test, PLAN.md phase 5). "
-             f"{skipped} run director{'y' if skipped == 1 else 'ies'} not selected.", ""]
+             f"{skipped} run director{'y' if skipped == 1 else 'ies'} not selected."]
+    if damaged:
+        lines.append(f"  {len(damaged)} of those have a manifest but could not be read: {_ids(list(damaged))} "
+                     f"-- investigate, not just skip.")
+    lines.append("")
     head = (f"{'variant':<8}{'condition':<10}{'dirs':>5}{'counted':>9}{'pass':>6}{'fail*':>6}{'repl':>6}{'unsc':>6}"
             f"{'ctx_lim':>9}{'steps':>7}{'malf':>6}{'strict':>7}{'maxtok':>7}{'nudges':>8}{'txt>cmd':>9}{'(+att)':>7}{'nudgeLim':>9}")
     lines += [head, "-" * len(head)]
@@ -305,9 +334,9 @@ def main(argv: list[str] | None = None) -> int:
         if since.tzinfo is None:
             print("--since needs a UTC offset, for example 2026-11-20T09:00:00+00:00 (run times are timezone-aware)")
             return 2
-    runs, skipped = load_pilot(args.runs_dir, commit=args.commit, since=since, order_seed=args.order_seed)
+    runs, skipped, damaged = load_pilot(args.runs_dir, commit=args.commit, since=since, order_seed=args.order_seed)
     cells = tally(runs)
-    print(render(cells, skipped, findings(cells)))
+    print(render(cells, skipped, findings(cells), damaged))
     return 0
 
 

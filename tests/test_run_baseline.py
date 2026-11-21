@@ -361,6 +361,35 @@ def test_run_baseline_trial_success_writes_the_record(tmp_path, good_runner, goo
     assert SEED["admin_password"] not in (run_dir / "baseline_result.json").read_text()
 
 
+def test_run_baseline_trial_writes_target_events_jsonl(tmp_path, good_runner, good_builder, event):
+    """D-089 item 7: the raw events are kept, validated, same as a model run's -- not only folded into
+    `milestones` and discarded, so a baseline run can be re-derived or re-scored later like a model one."""
+    clock = FakeClock()
+    events = [dict(event, seq=1), dict(event, seq=2, path="/catalog")]
+    lab = FakeBaselineLab(clock, runner=good_runner, events=events)
+
+    run_dir = run_baseline_trial(variant="B", lab=lab, runs_dir=tmp_path, clock=clock,
+                                 harness_commit="a" * 40, seed=SEED)
+
+    lines = (run_dir / "target_events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line) for line in lines] == events
+    notes = json.loads((run_dir / "harness_notes.json").read_text())
+    assert "target_event_problems" not in notes
+
+
+def test_run_baseline_trial_records_an_invalid_target_event(tmp_path, good_runner, good_builder, event):
+    clock = FakeClock()
+    bad_event = dict(event, seq=1, status="not-a-status")      # the schema requires an integer
+    lab = FakeBaselineLab(clock, runner=good_runner, events=[bad_event])
+
+    run_dir = run_baseline_trial(variant="B", lab=lab, runs_dir=tmp_path, clock=clock,
+                                 harness_commit="a" * 40, seed=SEED)
+
+    notes = json.loads((run_dir / "harness_notes.json").read_text())
+    assert len(notes["target_event_problems"]) == 1
+    assert notes["target_event_problems"][0].startswith("event 1:")
+
+
 def test_run_baseline_trial_runs_the_full_lifecycle_in_order(tmp_path, good_runner, good_builder):
     clock = FakeClock()
     lab = FakeBaselineLab(clock, runner=good_runner)

@@ -125,6 +125,19 @@ def test_a_long_list_of_development_runs_is_cut_to_a_count_in_the_finding():
     assert "and 7 more" in line and line.count("00000000") == 5      # five 8-character ids, then the count
 
 
+def test_a_batch_spanning_more_than_one_commit_is_a_finding():
+    """Mirrors baseline/compare.py's own commit-span note: a mixed-commit batch is comparable only by
+    accident, and nothing else here checks for it (--commit narrows deliberately; without it, this must)."""
+    runs = [facts("scored", passed=False, commit="a" * 40), facts("scored", passed=False, commit="b" * 40)]
+    line = next(n for n in pt.findings(pt.tally(runs)) if "spans" in n)
+    assert "2 harness commits" in line and "aaaaaaa" in line and "bbbbbbb" in line
+
+
+def test_a_single_commit_batch_has_no_commit_finding():
+    runs = [facts("scored", passed=False, commit="a" * 40), facts("scored", passed=False, commit="a" * 40)]
+    assert not any("spans" in n for n in pt.findings(pt.tally(runs)))
+
+
 def test_the_malformed_rate_and_per_run_nudges_are_over_the_runs_with_readable_steps():
     runs = [facts("scored", passed=False, steps=10, malformed=2, nudges=3),
             facts("replaced", steps=None, finished=False)]          # a partial run has no steps: not in the rate
@@ -175,7 +188,7 @@ def test_a_run_that_never_finished_is_matched_by_its_seed_when_the_partial_manif
     partial("a", run_order_seed=4242)           # this batch
     partial("b", run_order_seed=17)             # another batch's crashed run: not in the pilot
     partial("c")                                # a partial from before the seed was recorded: cannot be shown to belong
-    runs, skipped = pt.load_pilot(tmp_path, order_seed=4242)
+    runs, skipped, _damaged = pt.load_pilot(tmp_path, order_seed=4242)
     assert [r["run_id"][0] for r in runs] == ["a"] and skipped == 2
     assert len(pt.load_pilot(tmp_path)[0]) == 3          # with no seed asked for, all three are there
 
@@ -185,12 +198,27 @@ def test_a_baseline_directory_and_a_directory_with_no_manifest_are_not_model_run
     (tmp_path / "base" / "baseline_result.json").write_text("{}", encoding="utf-8")
     (tmp_path / "empty").mkdir()
     assert pt.read_run(tmp_path / "base") is None and pt.read_run(tmp_path / "empty") is None
+    assert not pt.looks_like_a_run(tmp_path / "base") and not pt.looks_like_a_run(tmp_path / "empty")
+
+
+def test_a_damaged_manifest_is_reported_separately_from_an_ordinary_skip(tmp_path):
+    """A directory with no manifest at all (not a model run) and one whose manifest exists but cannot be
+    parsed (damaged) both count toward `skipped`, but only the damaged one is named: silently folding a
+    harness-corrupted run into the same bucket as an irrelevant directory would hide it from anyone looking
+    at the tally."""
+    (tmp_path / "not_a_run").mkdir()
+    damaged = tmp_path / "damaged"
+    damaged.mkdir()
+    (damaged / "manifest.json").write_text("{not valid json", encoding="utf-8")
+    runs, skipped, found_damaged = pt.load_pilot(tmp_path)
+    assert runs == [] and skipped == 2
+    assert found_damaged == ["damaged"]
 
 
 def test_selection_by_commit_time_and_order_seed_reports_what_it_skipped(tmp_path):
     a, *_ = make(tmp_path / "a", [text_reply()], score_fn=default_score_stub)
     pilot = pilot_dir(tmp_path, [a, a])
-    runs, skipped = pt.load_pilot(pilot, commit=COMMIT[:7], order_seed=7)
+    runs, skipped, _damaged = pt.load_pilot(pilot, commit=COMMIT[:7], order_seed=7)
     assert (len(runs), skipped) == (2, 0)
     assert pt.load_pilot(pilot, commit="deadbee")[1] == 2
     assert pt.load_pilot(pilot, order_seed=1)[1] == 2

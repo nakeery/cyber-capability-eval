@@ -1,6 +1,7 @@
 """The hand-labeling sheet for labeler validation (PLAN.md phase 5): make it, then check what you filled in.
 
     .venv/Scripts/python labeling/sheet.py make --latest 24            # the 24 newest model runs, shuffled
+    .venv/Scripts/python labeling/sheet.py make --order-seed 16009     # one pilot's own batch (D-098), not by recency
     .venv/Scripts/python labeling/sheet.py make runs/<id> runs/<id>    # or name the run directories
     .venv/Scripts/python labeling/sheet.py check runs/labeling/sheet.csv
 
@@ -30,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "harness"))
 
+import pilot_tally  # noqa: E402  (D-098's reader: resolves --order-seed to a batch's run directories)
 import telemetry  # noqa: E402
 
 RUNS_DIR = ROOT / "runs"
@@ -48,15 +50,24 @@ def load_manifest(run_dir: Path) -> dict | None:
     return telemetry._read_json(path)
 
 
-def pick_runs(run_dirs: list[Path], latest: int | None, runs_dir: Path) -> list[Path]:
-    """The directories to label: those named, or the `latest` newest model runs by manifest `started_at`."""
+def pick_runs(run_dirs: list[Path], latest: int | None, runs_dir: Path, order_seed: int | None = None) -> list[Path]:
+    """The directories to label: those named, the finished runs of a batch (`order_seed`, D-098 -- the
+    same batch `pilot_tally --order-seed` and `compare.py --model-run-seed` would read), or the `latest`
+    newest model runs by manifest `started_at`. `--latest` picks by recency, which silently mixes batches
+    if anything else (a stray test run, a second pilot) was made since; `--order-seed` picks by the batch
+    the runs actually recorded themselves under, so prefer it once a run has one."""
     if run_dirs:
         missing = [str(d) for d in run_dirs if load_manifest(d) is None]
         if missing:
             raise ValueError(f"not a model run (no manifest.json): {missing}")
         return list(run_dirs)
+    if order_seed is not None:
+        if latest is not None:
+            raise ValueError("pass --latest or --order-seed, not both")
+        facts, _skipped, _damaged = pilot_tally.load_pilot(runs_dir, order_seed=order_seed)
+        return [Path(f["_dir"]) for f in facts if f["finished"]]
     if latest is None:
-        raise ValueError("name run directories, or pass --latest N")
+        raise ValueError("name run directories, pass --latest N, or pass --order-seed N")
     found = []
     for path in sorted(Path(runs_dir).iterdir()):
         manifest = load_manifest(path) if path.is_dir() else None
@@ -103,6 +114,13 @@ def check_sheet(path: Path, runs_dir: Path = RUNS_DIR) -> tuple[list[str], dict[
     """(problems, counts). counts has labeled, unlabeled and notes (rows with a definition note)."""
     problems: list[str] = []
     counts = {"labeled": 0, "unlabeled": 0, "notes": 0}
+    # Indexed by the manifest's own run_id, never assumed from the directory name: a directory can be
+    # renamed, restaged or archived without the run_id inside it changing (baseline/compare.py's own rule).
+    by_run_id: dict[str, dict] = {}
+    for run_dir in Path(runs_dir).iterdir() if Path(runs_dir).exists() else []:
+        manifest = load_manifest(run_dir) if run_dir.is_dir() else None
+        if manifest is not None:
+            by_run_id[manifest["run_id"]] = manifest
     with Path(path).open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         if tuple(reader.fieldnames or ()) != COLUMNS:
@@ -121,7 +139,7 @@ def check_sheet(path: Path, runs_dir: Path = RUNS_DIR) -> tuple[list[str], dict[
             counts["labeled"] += 1
             for error in telemetry.validate_record("label", row_to_record(row)):
                 problems.append(f"line {number} (run {run_id[:8]}): {error}")
-            manifest = load_manifest(Path(runs_dir) / run_id)
+            manifest = by_run_id.get(run_id)
             if manifest is not None and not manifest.get("redacted", True):
                 for secret_field, name in (("flag", "the flag"), ("admin_password", "the admin password")):
                     secret = manifest.get(secret_field)
@@ -136,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     make = sub.add_parser("make")
     make.add_argument("run_dirs", nargs="*", type=Path)
     make.add_argument("--latest", type=int, help="label the N newest model runs under runs/")
+    make.add_argument("--order-seed", type=int, help="label a batch's finished runs by run_order_seed (D-098), "
+                                                      "not by recency")
     make.add_argument("--out", type=Path, default=DEFAULT_OUT)
     make.add_argument("--seed", type=int, default=0, help="the shuffle's seed (default 0)")
     make.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
@@ -146,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "make":
-            ids = make_sheet(pick_runs(args.run_dirs, args.latest, args.runs_dir), args.out, args.seed)
+            ids = make_sheet(pick_runs(args.run_dirs, args.latest, args.runs_dir, args.order_seed), args.out, args.seed)
             print(f"wrote {len(ids)} rows to {args.out} (shuffle seed {args.seed})")
             return 0
         problems, counts = check_sheet(args.sheet, args.runs_dir)

@@ -78,6 +78,35 @@ def test_no_commit_filter_keeps_every_commit():
     assert len(included) == 2
 
 
+def test_a_development_baseline_trial_is_left_out_not_silently_included():
+    """D-086: --allow-dirty is for the author's own use, never study data; a dirty baseline trial must be
+    excluded the same way outcome.py excludes a dirty model run, not left for select_baseline_runs's other
+    filters (commit/termination) to miss."""
+    result = make_result("eeeeeeee" + "0" * 24, "B")
+    result["_dirty_paths"] = ["baseline/run_baseline.py"]
+    included, left_out = compare.select_baseline_runs([result])
+    assert included == []
+    assert left_out == [("eeeeeeee", "B", "development run (uncommitted: baseline/run_baseline.py)")]
+
+
+def test_load_baseline_results_reads_dirty_paths_from_harness_notes(tmp_path):
+    run_dir = tmp_path / ("ffffffff" + "0" * 24)
+    run_dir.mkdir()
+    (run_dir / "baseline_result.json").write_text(json.dumps(make_result(run_dir.name, "A")), encoding="utf-8")
+    (run_dir / "harness_notes.json").write_text(json.dumps({"dirty_paths": ["baseline/run_baseline.py"]}),
+                                                encoding="utf-8")
+    [result] = compare.load_baseline_results(tmp_path)
+    assert result["_dirty_paths"] == ["baseline/run_baseline.py"]
+
+
+def test_load_baseline_results_defaults_to_no_dirty_paths_without_harness_notes(tmp_path):
+    run_dir = tmp_path / ("aaaaaaaa" + "0" * 24)
+    run_dir.mkdir()
+    (run_dir / "baseline_result.json").write_text(json.dumps(make_result(run_dir.name, "A")), encoding="utf-8")
+    [result] = compare.load_baseline_results(tmp_path)
+    assert result["_dirty_paths"] == []
+
+
 # --- the summary -------------------------------------------------------------------------------
 
 
@@ -169,15 +198,21 @@ def test_stage_two_failing_to_log_in_is_not_a_rule_two_finding():
 
 def test_summarize_model_groups_by_variant_and_condition_and_counts_scored_passes():
     rows = [
-        {"run_id": "1", "variant": "B", "condition": "hint", "milestones": list(FULL), "pass": True},
-        {"run_id": "2", "variant": "B", "condition": "hint", "milestones": ["injection"], "pass": False},
-        {"run_id": "3", "variant": "B", "condition": "hint", "milestones": [], "pass": None},
-        {"run_id": "4", "variant": "B", "condition": "no_hint", "milestones": [], "pass": False},
+        {"run_id": "1", "variant": "B", "condition": "hint", "milestones": list(FULL), "pass": True,
+         "termination_reason": "submitted"},
+        {"run_id": "2", "variant": "B", "condition": "hint", "milestones": ["injection"], "pass": False,
+         "termination_reason": "step_cap"},
+        {"run_id": "3", "variant": "B", "condition": "hint", "milestones": [], "pass": None,
+         "termination_reason": "step_cap"},
+        {"run_id": "4", "variant": "B", "condition": "no_hint", "milestones": [], "pass": False,
+         "termination_reason": "agent_stopped"},
     ]
     cells = compare.summarize_model(rows)
     hint = cells[("B", "hint")]
     assert hint["n"] == 3 and hint["milestones"]["injection"] == 2
     assert hint["passed"] == 1 and hint["scored"] == 2           # the unscored run is not counted as a fail
+    assert hint["step_cap_hit"] == 2                             # the real per-run command budget consumed
+    assert cells[("B", "no_hint")]["step_cap_hit"] == 0
     assert cells[("B", "no_hint")]["scored"] == 1
 
 
@@ -221,6 +256,21 @@ def test_main_leaves_a_replaced_model_run_out_of_the_model_table_and_says_why(tm
     assert "model run, api_error (model_error)" in out and "replaced, not counted" in out
     row = next(line.split() for line in out.split("Model runs")[1].splitlines() if line.startswith("B") and "no_hint" in line)
     assert row[:3] == ["B", "no_hint", "1"]          # n = 1: the replaced run is out of the table
+
+
+def test_main_does_not_double_count_the_same_directory_named_twice(tmp_path, capsys):
+    """The same path can reach model_dirs twice (e.g. named by --model-run and also matched by
+    --model-run-seed): it must be read and counted once, not once per mention."""
+    from harness_fakes import command, submit
+    from test_run import default_score_stub, make
+
+    ok, *_ = make(tmp_path / "ok", [command("ls"), submit("x")], score_fn=default_score_stub)
+    empty_runs = tmp_path / "none"
+    empty_runs.mkdir()
+    assert compare.main(["--runs-dir", str(empty_runs), "--model-run", str(ok), str(ok)]) == 0
+    out = capsys.readouterr().out
+    row = next(line.split() for line in out.split("Model runs")[1].splitlines() if line.startswith("B") and "no_hint" in line)
+    assert row[:3] == ["B", "no_hint", "1"]          # n = 1, not 2: the duplicate path was not read twice
 
 
 # --- rendering and the CLI ---------------------------------------------------------------------

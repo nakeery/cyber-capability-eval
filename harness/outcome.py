@@ -53,9 +53,10 @@ def agent_cause(manifest: dict, notes: dict) -> str | None:
     # container, an unreadable state: oom_killed None) is not shown to be the agent's, so it is replaced.
     if isinstance(stopped, dict) and stopped.get("oom_killed") is True:
         return "the attacker container was killed for memory"
-    # PLAN.md: a target that went down is the agent's doing unless the record shows it was unhealthy at the start.
-    # (The harness refuses to start the loop on an unhealthy target, so that case should not reach here; the table
-    # still answers it, as a replacement.)
+    # PLAN.md (D-097): a target that went down is the agent's doing only when the record shows it started
+    # healthy. The harness refuses to start the loop on an unhealthy target, so target_health_start should
+    # always be "healthy" here; "unhealthy" or "unknown" is answered as a replacement, for completeness,
+    # not because either is shown to be the agent's doing.
     if manifest.get("termination_reason") == "target_down" and manifest.get("target_health_start") == "healthy":
         return "the target went down during the run"
     return None
@@ -84,6 +85,8 @@ def outcome(manifest: dict, score: dict | None, notes: dict | None) -> Outcome:
         return Outcome(REPLACED, None, f"{detail}: the infrastructure, not the model")
 
     # A model's own ending: the scorer's pass stands, if there is a score that counts.
+    if notes.get("dirty_paths"):
+        return Outcome(UNSCORED, None, f"{termination} with a development run (uncommitted harness code)")
     if score is None:
         return Outcome(UNSCORED, None, f"{termination} with no score.json")
     if score.get("scorer_dirty_paths"):

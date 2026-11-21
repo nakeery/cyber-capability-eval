@@ -218,7 +218,7 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
             result.steps.append(step)
             on_step(step)
             raise
-        terminated = True
+        reason_before_this_turn = result.termination_reason
         if turn.kind == "submit_flag":
             result.termination_reason = "submitted"
         elif ran_command and not healthy:
@@ -231,23 +231,28 @@ def run_agent(*, model: ModelClient, executor: Executor, prompts: Prompts, condi
         elif turn.kind == "provider_block":
             result.termination_reason = "agent_stopped"
         elif turn.kind == "text_only":
-            if not reply.content:
+            if not reply.text:
                 # Structural, not policy: an empty assistant message cannot be carried into the next
                 # request (see the comment where classify_turn makes this text_only), so this is
                 # unconditional, the same as a provider block -- never nudged, whatever the limit is.
+                # reply.text, not reply.content: a content list that is non-empty but holds no actual
+                # text (e.g. a lone empty text block) is exactly as empty as `assistant_text` records it
+                # (step_kind.py's hit_the_nudge_limit reads that same field, D-083).
                 result.termination_reason = "agent_stopped"
             else:
                 consecutive_text_only += 1
                 if consecutive_text_only < limits.text_only_limit:
-                    terminated = False
                     text = prompts.continue_nudge
                     step.update(output_sent_to_model=text, nudged=True)
                     next_user_message = {"role": "user", "content": [{"text": text}]}
                 else:
                     result.termination_reason = "agent_stopped"
         else:
-            terminated = False
             consecutive_text_only = 0
+        # Derived, not hand-tracked: the loop ends exactly when a branch above actually decided a
+        # termination_reason this turn, so a future branch that forgets to flip a flag cannot leave the
+        # run's true state (continuing) disagreeing with what gets returned.
+        terminated = result.termination_reason != reason_before_this_turn
 
         result.steps.append(step)
         on_step(step)

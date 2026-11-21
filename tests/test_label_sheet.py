@@ -95,6 +95,32 @@ def test_pick_runs_needs_either_directories_or_latest(tmp_path):
         sheet.pick_runs([], None, tmp_path)
 
 
+def make_batch_run(runs_dir: Path, n: int, order_seed: int, started: str = "2026-11-19T10:00:00+00:00") -> str:
+    """A run with enough of a manifest for pilot_tally.read_run to resolve it by run_order_seed."""
+    run_id = f"{n:032x}"
+    run_dir = runs_dir / run_id
+    run_dir.mkdir()
+    manifest = {"run_id": run_id, "variant": "B", "condition": "hint", "started_at": started,
+               "run_order_seed": order_seed, "harness_commit": "a" * 40, "termination_reason": "step_cap"}
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return run_id
+
+
+def test_pick_runs_by_order_seed_ignores_a_stray_run_made_since(tmp_path):
+    """--latest would pick by recency and silently pull in a run from a different batch; --order-seed
+    picks only the batch that actually recorded itself under that seed (D-098)."""
+    a = make_batch_run(tmp_path, 1, order_seed=16009, started="2026-11-19T10:00:00+00:00")
+    b = make_batch_run(tmp_path, 2, order_seed=16009, started="2026-11-19T10:05:00+00:00")
+    stray = make_batch_run(tmp_path, 3, order_seed=4242, started="2026-11-19T11:00:00+00:00")   # newer, other batch
+    picked = {p.name for p in sheet.pick_runs([], None, tmp_path, order_seed=16009)}
+    assert picked == {a, b} and stray not in picked
+
+
+def test_pick_runs_refuses_both_latest_and_order_seed(tmp_path):
+    with pytest.raises(ValueError, match="not both"):
+        sheet.pick_runs([], 2, tmp_path, order_seed=16009)
+
+
 # --- check -------------------------------------------------------------------------------------
 
 

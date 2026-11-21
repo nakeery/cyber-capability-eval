@@ -55,11 +55,17 @@ FULL_CHAIN = EVENTS_MILESTONES
 
 
 def load_baseline_results(runs_dir: Path = RUNS_DIR) -> list[dict]:
-    """Every `baseline_result.json` under runs_dir, oldest first, each with its directory as `_dir`."""
+    """Every `baseline_result.json` under runs_dir, oldest first, each with its directory as `_dir`.
+    `_dirty_paths` carries `harness_notes.json`'s own field (D-086's --allow-dirty), read here once so
+    `select_baseline_runs` can exclude a development baseline trial the same way `outcome.py` does for
+    a model run: never silently in the table."""
     results = []
     for path in sorted(Path(runs_dir).glob("*/baseline_result.json")):
         result = json.loads(path.read_text(encoding="utf-8"))
         result["_dir"] = str(path.parent)
+        notes_path = path.parent / "harness_notes.json"
+        notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
+        result["_dirty_paths"] = list(notes.get("dirty_paths") or [])
         results.append(result)
     return sorted(results, key=lambda r: r["started_at"])
 
@@ -77,6 +83,9 @@ def select_baseline_runs(results: list[dict], *, commit: str | None = None,
             left_out.append((short, r["variant"], "excluded by name"))
         elif commit is not None and not r["harness_commit"].startswith(commit):
             left_out.append((short, r["variant"], f"harness commit {r['harness_commit'][:7]}, not {commit[:7]}"))
+        elif r.get("_dirty_paths"):
+            # D-086: a trial run with --allow-dirty is a development run, never study data.
+            left_out.append((short, r["variant"], f"development run (uncommitted: {', '.join(r['_dirty_paths'])})"))
         elif r["termination_reason"] != "completed":
             # D-074: an infrastructure failure is replaced, whatever milestone it reached, never counted.
             left_out.append((short, r["variant"], f"{r['termination_reason']} (D-074: replaced, not counted)"))
@@ -153,13 +162,15 @@ def resolve_model_run_seed(runs_dir: Path, order_seed: int) -> tuple[list[Path],
     (finished run directories, left_out entries for the runs that never finished, directories skipped by the seed).
     A run that never finished has only `manifest.partial.json`, which `model_run_row` cannot read (it needs a full
     manifest), so it is reported here directly, the way D-074 reports any replaced run, never passed on."""
-    facts, skipped = pilot_tally.load_pilot(runs_dir, order_seed=order_seed)
+    facts, skipped, damaged = pilot_tally.load_pilot(runs_dir, order_seed=order_seed)
     dirs, left_out = [], []
     for f in facts:
         if f["finished"]:
             dirs.append(Path(f["_dir"]))          # the directory read_run actually read, not reconstructed from run_id
         else:
             left_out.append((f["run_id"][:8], f["variant"], "model run, never finished (D-074: replaced, not counted)"))
+    left_out += [(name, "?", "model run: has a manifest but it could not be read -- investigate, not just skip")
+                for name in damaged]
     return dirs, left_out, skipped
 
 
@@ -176,7 +187,8 @@ def model_run_row(run_dir: Path) -> dict:
     verdict = load_outcome(run_dir)
     return {"run_id": manifest["run_id"], "variant": manifest["variant"], "condition": manifest["condition"],
             "milestones": list(events_chain(manifest, events).reached), "pass": verdict.passed,
-            "outcome": verdict.kind, "outcome_reason": verdict.reason}
+            "outcome": verdict.kind, "outcome_reason": verdict.reason,
+            "termination_reason": manifest["termination_reason"], "step_cap": manifest["step_cap"]}
 
 
 def summarize_model(rows: list[dict]) -> dict[tuple[str, str], dict]:
@@ -190,6 +202,10 @@ def summarize_model(rows: list[dict]) -> dict[tuple[str, str], dict]:
             "n": len(cell),
             "milestones": {m: sum(1 for r in cell if m in r["milestones"]) for m in FULL_CHAIN},
             "passed": sum(1 for r in scored if r["pass"]), "scored": len(scored),
+            # The real per-run command budget consumed, mirroring the baseline's own "stage 1 hit its cap"
+            # (D-089 item 5): how many of this cell's runs actually ran out of their step_cap, not just
+            # that the scorer passed or failed.
+            "step_cap_hit": sum(1 for r in cell if r["termination_reason"] == "step_cap"),
         }
     return out
 
@@ -228,7 +244,8 @@ def render(by_variant: dict[str, list[dict]], left_out: list[tuple[str, str, str
         for (variant, condition), c in model_cells.items():
             cells = "  ".join(f"{_pct(c['milestones'][m], c['n']):<22}" for m in FULL_CHAIN)
             pas = _pct(c["passed"], c["scored"]) if c["scored"] else "unscored"
-            lines.append(f"{variant:<8}{condition:<10}{c['n']:>3}  {cells}  {pas}")
+            capped = f" (step_cap hit in {c['step_cap_hit']}/{c['n']})" if c["step_cap_hit"] else ""
+            lines.append(f"{variant:<8}{condition:<10}{c['n']:>3}  {cells}  {pas}{capped}")
     lines += ["", f"Left out ({len(left_out)}):"] + [f"  {rid} {v}: {why}" for rid, v, why in left_out]
     lines += ["", "Expectation check (D-089 items 4, 5, 9): " + ("every written expectation held." if not findings else "")]
     lines += [f"  - {f}" for f in findings]
@@ -265,13 +282,30 @@ def main(argv: list[str] | None = None) -> int:
               f"under {args.runs_dir} (skipped {skipped} other director{'y' if skipped == 1 else 'ies'}).\n")
         model_dirs += seed_dirs
         left_out += seed_left_out
+    # The same directory can reach model_dirs twice (named explicitly by --model-run and also matched by
+    # --model-run-seed): dedup by resolved path before reading any of them, so summarize_model never
+    # double-counts one run. Order is kept; the first mention wins.
+    seen_dirs, deduped = set(), []
+    for d in model_dirs:
+        resolved = Path(d).resolve()
+        if resolved not in seen_dirs:
+            seen_dirs.add(resolved)
+            deduped.append(d)
+    model_dirs = deduped
     model_cells = None
     if model_dirs:
-        try:
-            rows = [model_run_row(d) for d in model_dirs]
-        except ValueError as err:
-            print(err)
-            return 2
+        rows = []
+        for d in model_dirs:
+            try:
+                rows.append(model_run_row(d))
+            except ValueError as err:
+                try:
+                    manifest = telemetry._read_json(Path(d) / "manifest.json")
+                except (OSError, ValueError):
+                    manifest = None
+                rid = manifest["run_id"][:8] if isinstance(manifest, dict) and "run_id" in manifest else Path(d).name
+                variant = manifest.get("variant", "?") if isinstance(manifest, dict) else "?"
+                left_out.append((rid, variant, f"model run: {err}"))
         # D-074: a replaced run leaves its cell and is reported, whatever milestone it reached.
         left_out += [(r["run_id"][:8], r["variant"], f"model run, {r['outcome_reason']} (D-074: replaced, not counted)")
                      for r in rows if r["outcome"] == REPLACED]
