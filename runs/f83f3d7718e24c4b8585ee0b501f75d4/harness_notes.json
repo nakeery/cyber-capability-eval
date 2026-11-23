@@ -1,0 +1,15 @@
+{
+  "dirty_paths": [
+    "harness/agent.py",
+    "harness/local_pin.json",
+    "harness/prompt_set.py",
+    "prompts/hint.txt",
+    "prompts/messages.json",
+    "prompts/system.md",
+    "schemas/run_manifest.schema.json",
+    "schemas/step.schema.json"
+  ],
+  "left_after_down": [],
+  "validation": [],
+  "score_error": "CommitError: scoring code has uncommitted changes, so HEAD does not describe it:\nM schemas/run_manifest.schema.json\n M schemas/step.schema.json"
+}

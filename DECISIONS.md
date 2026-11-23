@@ -2205,3 +2205,28 @@ Every one of D-089's written expectations still held on this baseline slice (the
 **Tests:** `tests/test_compare.py` (dirty-baseline exclusion, `load_baseline_results` reading `_dirty_paths`, the directory-dedup case, `step_cap_hit`), `tests/test_pilot_tally.py` (`looks_like_a_run`, the damaged-vs-ordinary-skip split, the mixed-commit finding), `tests/test_label_sheet.py` (`--order-seed` picks a batch and ignores a newer stray run; `--latest` and `--order-seed` together is refused).
 
 **Constrains:** `baseline/compare.py`, `harness/pilot_tally.py`, `labeling/sheet.py`, and their test files.
+
+---
+
+## D-104: `runs/`, the filled skeleton fixtures, `drafts/` and two scratch files are now tracked in git
+
+**Date:** 2026-11-22 · **Status:** accepted (the author's decision, after a scan of these paths) · **Supersedes in part:** the "secrets never enter git" invariant as CLAUDE.md worded it (per-run flag and password live only in gitignored `runs/`), D-035/D-039/D-044's "local and gitignored" for `tests/fixtures/skeletons_filled/`, and the `.gitignore` entries for `/drafts/` and `/fill_check.py` · **Relates to:** D-035, D-039, D-044, D-076, D-086, D-099, D-101
+
+**What changed.** `.gitignore` no longer ignores `runs/`, `tests/fixtures/skeletons_filled/`, `/drafts/` or `/fill_check.py`; `*.log` stays ignored except `runs/**/*.log` and `/stage1_sqlmap.log`. Files that stay ignored: `.env*`, `*.pem`, `*.key`, `credentials`, `seed.json`, `*.local.json` (so `infra/bootstrap/budget-notifications.local.json`, which holds the author's private email, is still never tracked), `*.db` (the PyRIT memory database), `.venv/` and caches.
+
+**Why.** The work moves between machines. `runs/` is the only copy of the pilot (seed 16009), the sqlmap baseline trials and the author's hand labels (`runs/labeling/sheet_16009.csv`), which D-099 to D-103 cite by name, and the filled skeletons are what the scorer's end-to-end test needs (it was skipped in CI because they were not in a checkout). Carrying them by hand is a way to lose them.
+
+**What was checked first (2026-11-22, text files only).** A scan of `runs/`, `drafts/`, `tests/fixtures/skeletons_filled/`, `stage1_sqlmap.log` and `fill_check.py` found no email address, no AWS key id, no `arn:aws`, no account-id-shaped number near "aws" or "account", no API key or bearer token, no hostname and no `nakeery`. It found: the author's Windows username inside Python traceback paths in 6 `harness_notes.json` files (unhandled `KeyboardInterrupt`, which writes a traceback); and Docker bridge addresses (`172.18.0.1`, `172.19.0.1`), which are the lab's own network. The scan did not cover binary files (there are none under `runs/`: its 1,491 files are `json`, `jsonl`, `log` and 2 `csv`).
+
+**What the author accepted.**
+- The repository is public. The per-run flag, admin password, four decoy passwords and Flask `secret_key` of every development run (`harness/run.py` `new_seed`, `secrets.token_urlsafe`) are now public. Each run draws fresh values, so a past run's values give no later run a shortcut. This holds for the main experiment too, but only because the harness never reuses a seed.
+- The agent transcripts (`steps.jsonl`), including payloads and any extracted credentials, and the filled skeletons' working hand-exploits are public. The author is not concerned about training-data contamination for this proof of concept (D-076: researcher-side concerns are out of scope; contamination of a future model is a validity threat the report may name).
+- The username in those 6 notes files.
+
+**What this does not change.** `runs/` is still not in `HARNESS_CODE` (`harness/run.py`), so new run directories do not make the tree "dirty" and do not trigger `--allow-dirty` (D-086). A run records `harness_commit` at its start, so committing run data between runs of one batch splits that batch across commits, which `pilot_tally` and `compare.py` flag (D-103): commit a batch's data after the whole batch, not in between. `results/` copies for the report are still redacted. The AWS credentials in `~/.aws` and the model server's API key file are outside the repo and must never be added.
+
+**Test effect.** `tests/test_scorer.py`'s test over the six filled skeletons ran only locally before; in CI it now runs.
+
+**Constrains:** `.gitignore`, `CLAUDE.md`'s invariants bullet, and the rule that any future addition to these paths is scanned first.
+
+**Amendment (2026-11-22, same PR):** CI's first run on this branch failed at collection: `drafts/pyrit_quick_test.py` matches pytest's `*_test.py` pattern and imports `pyrit`, which `requirements.txt` does not install (`requirements-pyrit.txt` is separate). A new root `pytest.ini` sets `addopts = --ignore=drafts`, so tracked scratch scripts are never collected. A file that a collecting tool can pick up is now a thing to check before tracking a scratch directory.

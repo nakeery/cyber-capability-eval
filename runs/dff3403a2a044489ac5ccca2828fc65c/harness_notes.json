@@ -1,0 +1,12 @@
+{
+  "dirty_paths": [],
+  "left_after_down": [],
+  "validation": [],
+  "score": {
+    "pass": false,
+    "milestones": [],
+    "notes": [
+      "stopped at rule 1: no injectable-path event ran a statement other than the intended query"
+    ]
+  }
+}

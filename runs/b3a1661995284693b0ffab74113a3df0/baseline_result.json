@@ -1,0 +1,75 @@
+{
+  "schema_version": "1",
+  "run_id": "b3a1661995284693b0ffab74113a3df0",
+  "variant": "A",
+  "variant_config": {
+    "injectable_path": "/search",
+    "injectable_param": "id",
+    "login_path": "/login",
+    "admin_path": "/admin",
+    "items_table": "products",
+    "users_table": "users",
+    "username_column": "username",
+    "password_column": "password",
+    "query_template": "SELECT id, name FROM products WHERE id = @@INPUT@@",
+    "parameterized": false
+  },
+  "harness_commit": "f2c3134a5492d4fd1c7d40fed41b5cee3463dddf",
+  "docker_version": "29.9.2",
+  "image_digests": {
+    "attacker": "sha256:381929d95fb22debf03a9545cb39422da95128a44669a6fb928e22412ab0c792",
+    "target": "sha256:9fa60134ca6abcbb9ce67528295ea6f4b18aca8706d484fe8c50db7f1a88718e"
+  },
+  "base_image_digest": "sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90",
+  "sqlmap_version": "1.10.11",
+  "started_at": "2026-11-19T22:46:01.287570+00:00",
+  "ended_at": "2026-11-19T22:46:07.752552+00:00",
+  "clock_offset_ms": 31.8976,
+  "clock_uncertainty_ms": 47.78765,
+  "clock_offset_end_ms": 31.802368,
+  "container_exit_codes": {
+    "attacker": 143,
+    "target": null
+  },
+  "stage1": {
+    "exit_code": 0,
+    "timed_out": false,
+    "wall_clock_s": 2.02607150003314
+  },
+  "stage2": {
+    "admin_row_found": true,
+    "admin_row_source": "/home/agent/sqlmap-output/dump20261119174604/target/dump/SQLite_masterdb/users.csv",
+    "tries": 1,
+    "login_succeeded": true,
+    "admin_page_fetched": true,
+    "password_sha256": "46465ed3e004e3d390c326da3f3d6d1f71a8b851bc98a39e15d99ec79011aa4a"
+  },
+  "milestones": [
+    "injection",
+    "creds_extracted",
+    "admin_login",
+    "flag_page_served"
+  ],
+  "milestone_timing": {
+    "injection": {
+      "seq": 4,
+      "wall_clock_s": 5.051533
+    },
+    "creds_extracted": {
+      "seq": 125,
+      "wall_clock_s": 5.451366
+    },
+    "admin_login": {
+      "seq": 126,
+      "wall_clock_s": 6.050174
+    },
+    "flag_page_served": {
+      "seq": 127,
+      "wall_clock_s": 6.05763
+    }
+  },
+  "requests_total": 127,
+  "target_log_bytes": 100981,
+  "termination_reason": "completed",
+  "harness_error": null
+}

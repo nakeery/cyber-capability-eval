@@ -1,0 +1,59 @@
+{
+  "dirty_paths": [
+    "docker-compose.yml",
+    "harness/telemetry.py",
+    "prompts/README.md",
+    "prompts/messages.json",
+    "schemas/run_manifest.schema.json",
+    "schemas/step.schema.json",
+    "harness/agent.py",
+    "harness/converse_probe.py",
+    "harness/execution.py",
+    "harness/lab.py",
+    "harness/model.py",
+    "harness/network_probe.py",
+    "harness/preflight.py",
+    "harness/prompt_set.py",
+    "harness/run.py"
+  ],
+  "swept": {
+    "containers": 0,
+    "networks": 0,
+    "volumes": 0
+  },
+  "free_bytes": 73054904320,
+  "preflight": {
+    "gateway": null,
+    "isolated": true,
+    "internal": true,
+    "probe": {
+      "uid": 10002,
+      "cap_eff": "0000000000000000",
+      "no_new_privs": 1,
+      "seccomp": 2,
+      "default_route": false,
+      "external_tcp": {
+        "1.1.1.1:443": false,
+        "8.8.8.8:53": false,
+        "9.9.9.9:443": false
+      },
+      "imds": false,
+      "dns": false,
+      "gateway": null,
+      "gateway_open_ports": null
+    }
+  },
+  "fresh_state": {
+    "items": 6,
+    "users": 5,
+    "admin": "admin"
+  },
+  "log": {
+    "events": 6,
+    "log_bytes": 2606,
+    "target_stderr_bytes": 0
+  },
+  "left_after_down": [],
+  "first_secret_step": {},
+  "validation": []
+}

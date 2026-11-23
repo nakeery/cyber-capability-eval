@@ -29,23 +29,15 @@ terraform.rc
 # NOTE: .terraform.lock.hcl is intentionally NOT ignored; commit it to pin provider versions.
 
 # --- Experiment output --------------------------------------------------
-# Raw per-run telemetry, manifests (they hold each run's flag and password) and
-# the PyRIT memory DB all live under runs/. Curated, secret-free results go in
-# results/ and ARE committed.
-runs/
+# runs/ is TRACKED (D-104): raw per-run telemetry and manifests, the labeling sheets, and the
+# filled skeleton fixtures, drafts and scratch files below. A manifest holds that run's flag,
+# password and secret_key; they are random per run (secrets.token_urlsafe) and spent when the
+# run ends, and the author accepted publishing them. The PyRIT memory DB (*.db, below) stays
+# ignored. Curated, redacted results go in results/ and ARE committed.
+# Log files stay ignored, except each run's own logs and the sqlmap stage-1 log.
 *.log
-
-# Skeleton runs filled with real hand-exploit content (D-035, D-039, D-044). The
-# committed skeletons under tests/fixtures/skeletons/ stay placeholders.
-tests/fixtures/skeletons_filled/
-
-# The author's personal scratch scripts at the repo root (e.g. fill_check.py), kept
-# local rather than tracked.
-/fill_check.py
-
-# Session scratch tooling and diagnostic findings (watch_steps.ps1, seed-replay checks, log.md, etc.).
-# Useful locally, never committed.
-/drafts/
+!runs/**/*.log
+!/stage1_sqlmap.log
 
 # Databases anywhere: PyRIT memory, the target's SQLite file during local testing.
 *.db

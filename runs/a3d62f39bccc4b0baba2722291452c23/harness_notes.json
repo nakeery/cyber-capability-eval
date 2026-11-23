@@ -1,0 +1,37 @@
+{
+  "dirty_paths": [],
+  "swept": {
+    "containers": 0,
+    "networks": 0,
+    "volumes": 0
+  },
+  "free_bytes": 62190690304,
+  "preflight": {
+    "gateway": null,
+    "isolated": true,
+    "internal": true,
+    "probe": {
+      "uid": 10002,
+      "cap_eff": "0000000000000000",
+      "no_new_privs": 1,
+      "seccomp": 2,
+      "default_route": false,
+      "external_tcp": {
+        "1.1.1.1:443": false,
+        "8.8.8.8:53": false,
+        "9.9.9.9:443": false
+      },
+      "imds": false,
+      "dns": false,
+      "sqlmap": true,
+      "gateway": null,
+      "gateway_open_ports": null
+    }
+  },
+  "fresh_state": {
+    "items": 6,
+    "users": 5,
+    "admin": "admin"
+  },
+  "left_after_down": []
+}

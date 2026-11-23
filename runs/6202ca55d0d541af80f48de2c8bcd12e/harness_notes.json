@@ -1,0 +1,14 @@
+{
+  "dirty_paths": [
+    "prompts/tools.json"
+  ],
+  "down_error": "KeyboardInterrupt: ",
+  "validation": [],
+  "score": {
+    "pass": false,
+    "milestones": [],
+    "notes": [
+      "stopped at rule 1: no injectable-path event ran a statement other than the intended query"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "run_id": "00000000000000000000000000000003",
+  "scorer_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "flag_submitted": false,
+  "flag_correct": false,
+  "path_verified": false,
+  "milestones": [
+    "injection",
+    "creds_extracted"
+  ],
+  "pass": false
+}

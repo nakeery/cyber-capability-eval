@@ -1,0 +1,14 @@
+{
+  "dirty_paths": [
+    "harness/agent.py",
+    "harness/local_pin.json",
+    "harness/prompt_set.py",
+    "prompts/messages.json",
+    "schemas/step.schema.json"
+  ],
+  "left_after_down": [],
+  "validation": [
+    "manifest inference_config/temperature: 1.2 is greater than the maximum of 1"
+  ],
+  "score_error": "CommitError: scoring code has uncommitted changes, so HEAD does not describe it:\nM schemas/step.schema.json"
+}

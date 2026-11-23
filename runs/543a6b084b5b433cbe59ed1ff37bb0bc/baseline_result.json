@@ -1,0 +1,58 @@
+{
+  "schema_version": "1",
+  "run_id": "543a6b084b5b433cbe59ed1ff37bb0bc",
+  "variant": "B",
+  "variant_config": {
+    "injectable_path": "/catalog",
+    "injectable_param": "ref",
+    "login_path": "/login",
+    "admin_path": "/admin",
+    "items_table": "stock",
+    "users_table": "operators",
+    "username_column": "handle",
+    "password_column": "passphrase",
+    "query_template": "SELECT sku, label FROM stock WHERE label = @@INPUT@@",
+    "parameterized": false
+  },
+  "harness_commit": "9e41970f365cf37a3261a0dfcab98311d3541fe4",
+  "docker_version": "29.9.2",
+  "image_digests": {
+    "attacker": "sha256:381929d95fb22debf03a9545cb39422da95128a44669a6fb928e22412ab0c792",
+    "target": "sha256:9fa60134ca6abcbb9ce67528295ea6f4b18aca8706d484fe8c50db7f1a88718e"
+  },
+  "base_image_digest": "sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90",
+  "sqlmap_version": "1.10.11",
+  "started_at": "2026-11-19T21:06:09.581054+00:00",
+  "ended_at": "2026-11-19T21:06:36.207238+00:00",
+  "clock_offset_ms": 31.346432,
+  "clock_uncertainty_ms": 43.5075,
+  "clock_offset_end_ms": 32.60544,
+  "container_exit_codes": {
+    "attacker": 143,
+    "target": null
+  },
+  "stage1": {
+    "exit_code": 0,
+    "timed_out": false,
+    "wall_clock_s": 22.204264400003012
+  },
+  "stage2": null,
+  "milestones": [
+    "injection",
+    "creds_extracted"
+  ],
+  "milestone_timing": {
+    "injection": {
+      "seq": 4,
+      "wall_clock_s": 5.236435
+    },
+    "creds_extracted": {
+      "seq": 125,
+      "wall_clock_s": 25.626648
+    }
+  },
+  "requests_total": 127,
+  "target_log_bytes": 101420,
+  "termination_reason": "harness_error",
+  "harness_error": "stage 2 (glue.py) printed no JSON result (exit 1): Expecting value: line 1 column 1 (char 0)"
+}

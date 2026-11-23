@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "run_id": "f27cae155f6e43309d885a7995fab732",
+  "scorer_commit": "400bfd40013e95d89a0e42a13536e357bd137dad",
+  "flag_submitted": false,
+  "flag_correct": false,
+  "path_verified": false,
+  "milestones": [],
+  "pass": false
+}
