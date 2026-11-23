@@ -2228,3 +2228,5 @@ Every one of D-089's written expectations still held on this baseline slice (the
 **Test effect.** `tests/test_scorer.py`'s test over the six filled skeletons ran only locally before; in CI it now runs.
 
 **Constrains:** `.gitignore`, `CLAUDE.md`'s invariants bullet, and the rule that any future addition to these paths is scanned first.
+
+**Amendment (2026-11-22, same PR):** CI's first run on this branch failed at collection: `drafts/pyrit_quick_test.py` matches pytest's `*_test.py` pattern and imports `pyrit`, which `requirements.txt` does not install (`requirements-pyrit.txt` is separate). A new root `pytest.ini` sets `addopts = --ignore=drafts`, so tracked scratch scripts are never collected. A file that a collecting tool can pick up is now a thing to check before tracking a scratch directory.
