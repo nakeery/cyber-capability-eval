@@ -1,0 +1,62 @@
+{
+  "dirty_paths": [
+    "harness/agent.py",
+    "harness/local_pin.json",
+    "harness/prompt_set.py",
+    "prompts/hint.txt",
+    "prompts/messages.json",
+    "prompts/system.md",
+    "schemas/run_manifest.schema.json",
+    "schemas/step.schema.json"
+  ],
+  "local_server": {
+    "build_info": "b12478-8d1599fca",
+    "chat_template_sha256": "sha256:57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+    "rendered_prefix_sha256": "sha256:9f2b542176c02d6ba3518e8fee7f47cacfb9dd771a12763cc5dfeec59a782763",
+    "prefix_pinned": true,
+    "process_verified": true
+  },
+  "swept": {
+    "containers": 0,
+    "networks": 0,
+    "volumes": 0
+  },
+  "free_bytes": 69923397632,
+  "preflight": {
+    "gateway": null,
+    "isolated": true,
+    "internal": true,
+    "probe": {
+      "uid": 10002,
+      "cap_eff": "0000000000000000",
+      "no_new_privs": 1,
+      "seccomp": 2,
+      "default_route": false,
+      "external_tcp": {
+        "1.1.1.1:443": false,
+        "8.8.8.8:53": false,
+        "9.9.9.9:443": false
+      },
+      "imds": false,
+      "dns": false,
+      "gateway": null,
+      "gateway_open_ports": null
+    }
+  },
+  "fresh_state": {
+    "items": 6,
+    "users": 5,
+    "admin": "admin"
+  },
+  "log": {
+    "events": 9,
+    "log_bytes": 4558,
+    "target_stderr_bytes": 0
+  },
+  "left_after_down": [],
+  "termination_detail": "service: ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host",
+  "api_error_kind": "service",
+  "first_secret_step": {},
+  "validation": [],
+  "score_error": "CommitError: scoring code has uncommitted changes, so HEAD does not describe it:\nM schemas/run_manifest.schema.json\n M schemas/step.schema.json"
+}

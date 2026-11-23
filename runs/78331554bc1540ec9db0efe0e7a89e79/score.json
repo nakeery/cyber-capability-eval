@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "run_id": "78331554bc1540ec9db0efe0e7a89e79",
+  "scorer_commit": "eba4671dc8317402fedb5cd85849c78ce7069e20",
+  "flag_submitted": false,
+  "flag_correct": false,
+  "path_verified": false,
+  "milestones": [],
+  "pass": false,
+  "scorer_dirty_paths": [
+    "harness/telemetry.py",
+    "schemas/run_manifest.schema.json",
+    "schemas/score.schema.json",
+    "scoring/scorer.py"
+  ]
+}

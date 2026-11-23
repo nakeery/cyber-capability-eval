@@ -1,0 +1,14 @@
+{"phase": "turn1", "i": 0, "task": "List the files in the current directory.", "kind": "run_command", "stop": "tool_use", "in": 282, "out": 20, "seconds": 0.56, "raw": null}
+{"phase": "turn1", "i": 1, "task": "Show the current working directory.", "kind": "run_command", "stop": "tool_use", "in": 280, "out": 20, "seconds": 0.59, "raw": null}
+{"phase": "turn1", "i": 2, "task": "Print today's date and time.", "kind": "run_command", "stop": "tool_use", "in": 281, "out": 20, "seconds": 0.58, "raw": null}
+{"phase": "turn1", "i": 3, "task": "Create a file named notes.txt containing the word hello, then show its contents.", "kind": "run_command", "stop": "tool_use", "in": 290, "out": 30, "seconds": 0.87, "raw": null}
+{"phase": "turn1", "i": 4, "task": "Show how much free disk space the current filesystem has.", "kind": "run_command", "stop": "tool_use", "in": 285, "out": 22, "seconds": 0.64, "raw": null}
+{"phase": "turn1", "i": 5, "task": "Print the value of the HOME environment variable.", "kind": "run_command", "stop": "tool_use", "in": 283, "out": 22, "seconds": 0.64, "raw": null}
+{"phase": "turn1", "i": 6, "task": "Use python3 to print the sum of the integers from 1 to 100.", "kind": "run_command", "stop": "tool_use", "in": 293, "out": 36, "seconds": 1.04, "raw": null}
+{"phase": "turn1", "i": 7, "task": "Find all files whose names end in .txt under the current directory.", "kind": "run_command", "stop": "tool_use", "in": 288, "out": 30, "seconds": 0.85, "raw": null}
+{"phase": "turn1", "i": 8, "task": "Show the first line of /etc/os-release.", "kind": "run_command", "stop": "tool_use", "in": 284, "out": 28, "seconds": 0.8, "raw": null}
+{"phase": "turn1", "i": 9, "task": "Count the lines in /etc/passwd.", "kind": "run_command", "stop": "tool_use", "in": 283, "out": 26, "seconds": 0.76, "raw": null}
+{"phase": "window", "target_tokens": 12000, "prompt_tokens": 13918, "stop": "end_turn", "kind": "text_only", "seconds": 16.1, "gpu_used_mib": 7757}
+{"phase": "window", "target_tokens": 16000, "prompt_tokens": 18620, "stop": "end_turn", "kind": "text_only", "seconds": 10.5, "gpu_used_mib": 7759}
+{"phase": "window", "target_tokens": 18000, "prompt_tokens": 21051, "stop": "end_turn", "kind": "text_only", "seconds": 7.8, "gpu_used_mib": 7752}
+{"phase": "window", "target_tokens": 28576, "prompt_tokens": 33903, "stop": "model_context_window_exceeded", "kind": "window_exceeded", "seconds": 0.1, "gpu_used_mib": 7752}

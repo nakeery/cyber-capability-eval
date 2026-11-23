@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "<stdin>", line 153, in <module>
+  File "<stdin>", line 137, in main
+  File "/usr/local/lib/python3.13/pathlib/_abc.py", line 465, in is_dir
+    return S_ISDIR(self.stat(follow_symlinks=follow_symlinks).st_mode)
+                   ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.13/pathlib/_local.py", line 515, in stat
+    return os.stat(self, follow_symlinks=follow_symlinks)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/home/agent/sqlmap-output'
